@@ -1,50 +1,51 @@
-# 🚀 Recy — Intelligent Crypto Market Insight & Recommendation API
+# Recy — Intelligent Crypto Market Insight & Recommendation API
 
-![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green.style=for-the-badge)
+Recy adalah platform REST API dan sistem analitik cryptocurrency berbasis AI dan algoritma kustom. Sistem ini menggabungkan data pasar real-time, indikator teknikal, serta analisis sentimen berita untuk menghasilkan rekomendasi aset (*BUY*, *HOLD*, atau *SELL*) secara obyektif dan terukur.
 
-**Recy** adalah platform REST API dan sistem analitik cryptocurrency berbasis AI & algoritma yang menggabungkan **data pasar crypto real-time, analisis indikator teknikal, serta analisis sentimen berita terbaru** untuk menghasilkan skor rekomendasi aset yang terukur (**BUY**, **HOLD**, atau **SELL**).
-
-> 📌 **Dokumen Perencanaan Lengkap:** Detail spesifikasi dan arsitektur dapat dilihat pada [docs/crypto_recommendation_planning.md](file:///c:/Project/Magang/Recy/docs/crypto_recommendation_planning.md).
+Dokumentasi spesifikasi lengkap dapat dibaca pada [docs/crypto_recommendation_planning.md](file:///c:/Project/Magang/Recy/docs/crypto_recommendation_planning.md).
 
 ---
 
-## 📑 Daftar Isi
+## Table of Contents
 
-- [✨ Fitur Utama](#-fitur-utama)
-- [🏗️ Arsitektur & Alur Data](#️-arsitektur--alur-data)
-- [🧮 Algoritma Recommendation Engine](#-algoritma-recommendation-engine)
-- [🛠️ Teknologi yang Digunakan](#️-teknologi-yang-digunakan)
-- [📂 Struktur Proyek](#-struktur-proyek)
-- [🚀 Panduan Penggunaan & Instalasi](#-panduan-penggunaan--instalasi)
-  - [1. Prasyarat](#1-prasyarat)
-  - [2. Kloning Repository](#2-kloning-repository)
-  - [3. Setup Virtual Environment](#3-setup-virtual-environment)
-  - [4. Instalasi Dependency](#4-instalasi-dependency)
-  - [5. Konfigurasi Environment](#5-konfigurasi-environment)
-  - [6. Menjalankan Server API](#6-menjalankan-server-api)
-- [📡 Endpoint API Utama](#-endpoint-api-utama)
-- [🗺️ Tahapan Pengembangan (Roadmap MVP)](#️-tahapan-pengembangan-roadmap-mvp)
-- [⚠️ Disclaimer](#️-disclaimer)
-
----
-
-## ✨ Fitur Utama
-
-- **📊 Integration Data Pasar (Market Data):** Mengambil harga terbaru, volume, market cap, dan perubahan harga 24 jam dari provider terpercaya (CoinGecko API / Exchange API).
-- **📈 Analisis Teknikal Otomatis:** Menghitung indikator teknikal populer seperti **RSI**, **MACD**, **SMA (Simple Moving Average)**, dan **EMA (Exponential Moving Average)** dari data historis.
-- **📰 News Data & AI Sentiment Analysis:** Mengagregasi berita crypto (Google News RSS / News API) dan menganalisis sentimen publik (*Positive*, *Neutral*, *Negative*) menggunakan AI NLP model.
-- **⚡ Recommendation Engine:** Penggabungan pembobotan multi-faktor (*Technical Score*, *Sentiment Score*, *Market Score*) untuk menghasilkan klasifikasi rekomendasi objektif.
-- **⏱️ Near Real-time Updates & Caching:** Optimasi query dan caching data menggunakan Redis.
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [System Architecture](#system-architecture)
+- [Recommendation Engine Algorithm](#recommendation-engine-algorithm)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Installation & Getting Started](#installation--getting-started)
+  - [1. Prerequisites](#1-prerequisites)
+  - [2. Clone Repository](#2-clone-repository)
+  - [3. Environment Setup](#3-environment-setup)
+  - [4. Install Dependencies](#4-install-dependencies)
+  - [5. Environment Variables](#5-environment-variables)
+  - [6. Run Development Server](#6-run-development-server)
+- [API Endpoints](#api-endpoints)
+- [Development Roadmap](#development-roadmap)
+- [Disclaimer](#disclaimer)
 
 ---
 
-## 🏗️ Arsitektur & Alur Data
+## Overview
 
-Sistem bekerja secara modular dari pengumpulan data hingga penghasilan rekomendasi:
+Sistem Recy dirancang untuk mengolah data pasar cryptocurrency secara otomatis dan transparan. Dibandingkan hanya menampilkan grafik harga historis, Recy menganalisis kondisi teknikal pasar beserta sentimen publik dari berita terkini untuk memberikan skor kuantitatif dan rekomendasi aset.
+
+---
+
+## Key Features
+
+- **Market Data Integration:** Agregasi harga real-time, volume 24 jam, market capitalization, dan persentase perubahan harga dari provider pasar crypto (CoinGecko API).
+- **Automated Technical Indicators:** Kalkulasi indikator teknikal historis mencakup RSI (Relative Strength Index), MACD, SMA (Simple Moving Average), dan EMA (Exponential Moving Average).
+- **News Sentiment Analysis:** Ekstraksi berita crypto dari RSS/API dan pengolahan sentimen (*Positive*, *Neutral*, *Negative*) menggunakan model NLP AI.
+- **Multi-Weighted Scoring Engine:** Algoritma pembobotan gabungan antara skor teknikal, skor sentimen, dan skor kondisi pasar.
+- **Caching & High Performance:** Penggunaan Redis untuk manajemen cache data transient dan rate-limiting.
+
+---
+
+## System Architecture
+
+Alur pemrosesan data dari pengumpulan hingga penyajian rekomendasi:
 
 ```text
                   +--------------------------+
@@ -88,82 +89,79 @@ Sistem bekerja secara modular dari pengumpulan data hingga penghasilan rekomenda
 
 ---
 
-## 🧮 Algoritma Recommendation Engine
+## Recommendation Engine Algorithm
 
-Rekomendasi dihitung menggunakan kombinasi pembobotan proporsional:
+Rekomendasi dihitung menggunakan kombinasi pembobotan proporsional berikut:
 
 $$\text{Final Score} = (\text{Technical Score} \times 0.50) + (\text{Sentiment Score} \times 0.30) + (\text{Market Score} \times 0.20)$$
 
-### Matriks Klasifikasi Rekomendasi
+### Classification Matrix
 
-| Rentang Skor | Klasifikasi Rekomendasi | Keterangan Singkat |
+| Final Score Range | Recommendation | Description |
 | :--- | :--- | :--- |
-| **80 – 100** | **BUY** | Sinyal teknikal kuat & sentimen pasar positif |
+| **80 – 100** | **BUY** | Bullish teknikal kuat & sentimen publik sangat positif |
 | **60 – 79** | **HOLD / MODERATE BUY** | Kondisi pasar cenderung akumulatif |
-| **40 – 59** | **HOLD** | Kondisi netral / konsolidasi |
+| **40 – 59** | **HOLD** | Kondisi pasar netral / konsolidasi |
 | **20 – 39** | **MODERATE SELL** | Muncul sinyal teknikal lemah / sentimen negatif |
 | **0 – 19** | **SELL** | Tekanan jual tinggi & indikator bearish |
 
 ---
 
-## 🛠️ Teknologi yang Digunakan
+## Tech Stack
 
-- **Backend Web Framework:** [FastAPI](https://fastapi.tiangolo.com/) (Python 3.11+)
-- **Server ASGI:** [Uvicorn](https://www.uvicorn.org/)
-- **Data Analysis & Indicators:** [Pandas](https://pandas.pydata.org/), [ta](https://github.com/bukosabino/ta) (Technical Analysis Library)
-- **HTTP Client:** [HTTPX](https://www.python-httpx.org/) (Async HTTP Requests)
-- **Database (Target):** PostgreSQL
-- **Cache & Message Broker (Target):** Redis
-- **Frontend (Target Roadmap):** React / Next.js
+- **Backend Framework:** FastAPI (Python 3.11+)
+- **ASGI Server:** Uvicorn
+- **Data Processing:** Pandas, NumPy, `ta` (Technical Analysis Library)
+- **HTTP Client:** HTTPX (Async requests)
+- **Database:** PostgreSQL (Target)
+- **Cache & Queue:** Redis (Target)
+- **Frontend:** Next.js / React (Target)
 
 ---
 
-## 📂 Struktur Proyek
+## Project Structure
 
 ```text
 crypto-recommendation/
 │
 ├── app/
-│   ├── main.py                  # Entrypoint aplikasi FastAPI & routing utama
+│   ├── main.py                  # Entrypoint aplikasi & routing FastAPI
 │   ├── services/
-│   │   ├── crypto_service.py     # Integrasi CoinGecko API & market history
-│   │   └── technical_service.py  # Kalkulasi indikator teknikal (SMA, EMA, RSI, MACD)
-│   ├── api/                     # Sub-module router API (Target)
-│   ├── models/                  # Database models SQLAlchemy/SQLModel (Target)
-│   └── schemas/                 # Pydantic schemas (Target)
+│   │   ├── crypto_service.py     # Integrasi CoinGecko API & history
+│   │   └── technical_service.py  # Kalkulasi indikator (SMA, EMA, RSI, MACD)
+│   ├── api/                     # Router API endpoints
+│   ├── models/                  # Database models
+│   └── schemas/                 # Pydantic data schemas
 │
 ├── docs/
-│   └── crypto_recommendation_planning.md  # Dokumen perencanaan arsitektur lengkap
+│   └── crypto_recommendation_planning.md  # Spesifikasi teknis & perencanaan
 │
-├── tests/                       # Unit testing & integration testing
-├── .env.example                 # Template variabel lingkungan
-├── .gitignore                   # Aturan pengabaian file Git (venv, cache, secret)
-├── requirements.txt             # Daftar dependensi Python
+├── tests/                       # Test suite
+├── .env.example                 # Template konfigurasi variabel lingkungan
+├── .gitignore                   # Ignored files (venv, pycache, secrets)
+├── requirements.txt             # Manifest dependensi Python
 └── README.md                    # Dokumentasi utama proyek
 ```
 
 ---
 
-## 🚀 Panduan Penggunaan & Instalasi
+## Installation & Getting Started
 
-Ikuti langkah-langkah di bawah ini untuk menjalankan sistem **Recy** di lingkungan lokal Anda.
+### 1. Prerequisites
 
-### 1. Prasyarat
+- Python 3.11+
+- Git
 
-Pastikan perangkat Anda telah terinstal:
-- **Python 3.11** atau versi lebih baru.
-- **Git** untuk kontrol versi.
-
-### 2. Kloning Repository
+### 2. Clone Repository
 
 ```bash
 git clone https://github.com/DreamlandSR/Recy.git
 cd Recy
 ```
 
-### 3. Setup Virtual Environment
+### 3. Environment Setup
 
-Buat dan aktifkan *virtual environment* Python:
+Buat dan aktifkan virtual environment Python:
 
 - **Windows (PowerShell):**
   ```powershell
@@ -177,75 +175,62 @@ Buat dan aktifkan *virtual environment* Python:
   source .venv/bin/activate
   ```
 
-### 4. Instalasi Dependency
-
-Install seluruh kebutuhan library dengan perintah berikut:
+### 4. Install Dependencies
 
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 5. Konfigurasi Environment
+### 5. Environment Variables
 
-Salin file `.env.example` menjadi `.env` dan lengkapi konfigurasi API Key Anda:
+Salin `.env.example` ke `.env` dan atur variabel yang dibutuhkan:
 
-- **Windows (PowerShell):**
-  ```powershell
-  Copy-Item .env.example .env
-  ```
-- **Linux / macOS:**
-  ```bash
-  cp .env.example .env
-  ```
+```bash
+cp .env.example .env
+```
 
-Isi variabel pada file `.env`:
+Contoh konfigurasi pada `.env`:
+
 ```env
 APP_NAME=Recy
 APP_ENV=development
 APP_VERSION=0.1.0
 
-# API Keys
-COINGECKO_API_KEY=your_coingecko_api_key_here
+COINGECKO_API_KEY=your_api_key_here
 ```
 
-### 6. Menjalankan Server API
+### 6. Run Development Server
 
-Jalankan server FastAPI menggunakan Uvicorn:
+Jalankan Uvicorn server:
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-Jika server berhasil berjalan, Anda akan melihat output terminal berikut:
+Server akan berjalan pada `http://127.0.0.1:8000`.
 
-```text
-INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [...]
-INFO:     Application startup complete.
-```
-
-Dokumentasi OpenAPI Interaktif (Swagger UI) dapat diakses secara otomatis melalui browser:
-👉 **Swagger UI:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)  
-👉 **ReDoc:** [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
+Dokumentasi API interaktif dapat diakses melalui:
+- **Swagger UI:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **ReDoc:** [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
 
 ---
 
-## 📡 Endpoint API Utama
+## API Endpoints
 
-| Method | Endpoint | Deskripsi | Status |
+| Method | Endpoint | Description | Status |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/` | Health check & info versi API | ✅ Available |
-| `GET` | `/api/crypto/markets` | Mengambil data top 10 pasar cryptocurrency terbaru | ✅ Available |
-| `GET` | `/api/crypto/{coin_id}` | Detail pasar koin tertentu (contoh: `bitcoin`) | ✅ Available |
-| `GET` | `/api/crypto/{coin_id}/history` | Histori harga pasar 90 hari terakhir | ✅ Available |
-| `GET` | `/api/crypto/{coin_id}/technical` | Hasil kalkulasi indikator teknikal (SMA, EMA, RSI, MACD) | ✅ Available |
-| `GET` | `/api/crypto/{coin_id}/news` | Berita crypto terbaru terkait aset | 🚧 In Development |
-| `GET` | `/api/crypto/{coin_id}/recommendation` | Skor rekomendasi akhir (BUY/HOLD/SELL) | 🚧 In Development |
+| `GET` | `/` | Health check & versi API | Active |
+| `GET` | `/api/crypto/markets` | Top 10 data pasar cryptocurrency | Active |
+| `GET` | `/api/crypto/{coin_id}` | Detail pasar koin tertentu | Active |
+| `GET` | `/api/crypto/{coin_id}/history` | Histori harga 90 hari terakhir | Active |
+| `GET` | `/api/crypto/{coin_id}/technical` | Hasil kalkulasi indikator teknikal | Active |
+| `GET` | `/api/crypto/{coin_id}/news` | Agregasi berita crypto | Planned |
+| `GET` | `/api/crypto/{coin_id}/recommendation` | Hasil rekomendasi (BUY/HOLD/SELL) | Planned |
 
-### Contoh Respon API
+### Sample Response
 
-**Request:** `GET /api/crypto/bitcoin/technical`
+`GET /api/crypto/bitcoin/technical`
 
 ```json
 [
@@ -264,27 +249,21 @@ Dokumentasi OpenAPI Interaktif (Swagger UI) dapat diakses secara otomatis melalu
 
 ---
 
-## 🗺️ Tahapan Pengembangan (Roadmap MVP)
+## Development Roadmap
 
-- [x] **Tahap 1:** Persiapan Struktur & Fondasi Project FastAPI
-- [x] **Tahap 2:** Integrasi Data Pasar Real-Time (CoinGecko API)
-- [x] **Tahap 3:** Pengambilan & Penyimpanan Historical Price
-- [x] **Tahap 4:** Engine Kalkulasi Analisis Teknikal (RSI, MACD, SMA, EMA)
-- [ ] **Tahap 5:** Integrasi Source Berita (Google News RSS / News API)
-- [ ] **Tahap 6:** AI News Sentiment Analysis Model
-- [ ] **Tahap 7:** Implementation Scoring & Recommendation Engine
-- [ ] **Tahap 8:** Integrasi Database PostgreSQL & Caching Redis
-- [ ] **Tahap 9:** Dashboard UI Frontend (React / Next.js)
-- [ ] **Tahap 10:** Real-Time Push Notification & WebSocket Support
-
----
-
-## ⚠️ Disclaimer
-
-Sistem rekomendasi pada proyek ini dibuat untuk tujuan **analitis, riset, dan edukatif**. Hasil rekomendasi yang dihasilkan oleh sistem (*BUY/HOLD/SELL*) bukan merupakan nasihat keuangan (financial advice) atau jaminan kepastian investasi. Pengguna diharapkan selalu melakukan *Do Your Own Research* (DYOR) sebelum melakukan transaksi aset cryptocurrency.
+- [x] Stage 1: Setup struktur proyek & FastAPI foundation
+- [x] Stage 2: Integrasi CoinGecko API untuk market data
+- [x] Stage 3: Fetching & penyimpanan historical price
+- [x] Stage 4: Engine analisis teknikal (RSI, MACD, SMA, EMA)
+- [ ] Stage 5: Integrasi sumber berita (Google News RSS / News API)
+- [ ] Stage 6: AI News Sentiment Analysis
+- [ ] Stage 7: Implementation scoring & recommendation engine
+- [ ] Stage 8: Database PostgreSQL & Redis integration
+- [ ] Stage 9: Frontend Dashboard (React / Next.js)
+- [ ] Stage 10: Real-time update via WebSockets
 
 ---
 
-<p center>
-Crafted with ❤️ for Intelligent Crypto Market Analytics
-</p>
+## Disclaimer
+
+Sistem dan algoritma pada proyek ini dikembangkan semata-mata untuk tujuan riset, analisis data, dan edukasi. Hasil analisis maupun rekomendasi (*BUY/HOLD/SELL*) bukan merupakan nasihat keuangan atau ajakan investasi. Pengguna wajib melakukan analisis mandiri (*Do Your Own Research*) sebelum membuat keputusan finansial.
