@@ -25,7 +25,7 @@ async def get_market_data():
         "x-cg-demo-api-key": COINGECKO_API_KEY
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         response = await client.get(
             url,
             params=params,
@@ -51,7 +51,7 @@ async def get_coin_detail(coin_id: str):
         "developer_data": "false"
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         response = await client.get(
             url,
             params=params,
@@ -75,7 +75,7 @@ async def get_coin_history(coin_id: str):
         "interval": "daily"
     }
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         response = await client.get(
             url,
             params=params,
