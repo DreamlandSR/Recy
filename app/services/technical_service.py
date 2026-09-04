@@ -1,7 +1,7 @@
 import pandas as pd
 from ta.trend import SMAIndicator, EMAIndicator, MACD
 from ta.momentum import RSIIndicator
-
+from ta.volatility import BollingerBands
 
 def calculate_sma_ema(prices: list):
     df = pd.DataFrame(prices, columns=["timestamp", "price"])
@@ -30,6 +30,17 @@ def calculate_sma_ema(prices: list):
     df["macd"] = macd.macd()
     df["macd_signal"] = macd.macd_signal()
     df["macd_histogram"] = macd.macd_diff()
+    
+    bollinger = BollingerBands(
+        close=df["price"],
+        window=20,
+        window_dev=2
+    )
+    df["bb_middle"] = bollinger.bollinger_mavg()
+    df["bb_upper"] = bollinger.bollinger_hband()
+    df["bb_lower"] = bollinger.bollinger_lband()
+    df["bb_width"] = ( df["bb_upper"] - df["bb_lower"] ) / df["bb_middle"]
+    df["bb_position"] = ( df["price"] - df["bb_lower"] ) / ( df["bb_upper"] - df["bb_lower"] )
 
     result = df.dropna()
 
