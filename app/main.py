@@ -6,6 +6,8 @@ from app.services.crypto_service import (
 )
 
 from app.services.technical_service import calculate_sma_ema
+from app.services.scoring_service import calculate_technical_score
+from app.services.recommendation_service import generate_recommendation
 
 app = FastAPI(
     title="Recy API",
@@ -42,3 +44,45 @@ async def crypto_technical(coin_id: str):
     prices = history["prices"]
 
     return calculate_sma_ema(prices)
+
+@app.get("/api/crypto/{coin_id}/technical/score")
+async def crypto_technical_score(coin_id: str):
+    history = await get_coin_history(coin_id)
+
+    prices = history["prices"]
+
+    technical_data = calculate_sma_ema(prices)
+
+    latest_data = technical_data[-1]
+
+    score = calculate_technical_score(latest_data)
+
+    return {
+        "coin_id": coin_id,
+        "latest_data": latest_data,
+        "score": score
+    }
+    
+@app.get("/api/crypto/{coin_id}/recommendation")
+async def crypto_recommendation(coin_id: str):
+
+    history = await get_coin_history(coin_id)
+
+    prices = history["prices"]
+
+    technical_data = calculate_sma_ema(prices)
+
+    latest_data = technical_data[-1]
+
+    technical_score = calculate_technical_score(latest_data)
+
+    recommendation = generate_recommendation(
+        technical_score["technical_score"],
+        technical_score["condition"]
+    )
+
+    return {
+        "coin_id": coin_id,
+        "technical": technical_score,
+        "recommendation": recommendation
+    }
