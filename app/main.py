@@ -8,6 +8,7 @@ from app.services.crypto_service import (
 from app.services.technical_service import calculate_sma_ema
 from app.services.scoring_service import calculate_technical_score
 from app.services.recommendation_service import generate_recommendation
+from app.services.news_service import get_crypto_news
 
 app = FastAPI(
     title="Recy API",
@@ -86,3 +87,10 @@ async def crypto_recommendation(coin_id: str):
         "technical": technical_score,
         "recommendation": recommendation
     }
+    
+@app.get("/api/crypto/{coin_id}/news")
+async def crypto_news(coin_id: str):
+
+    news = await get_crypto_news(coin_id)
+
+    return news
