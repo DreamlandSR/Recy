@@ -9,6 +9,7 @@ from app.services.technical_service import calculate_sma_ema
 from app.services.scoring_service import calculate_technical_score
 from app.services.recommendation_service import generate_recommendation
 from app.services.news_service import get_crypto_news
+from app.services.sentiment_service import analyze_news_sentiment, calculate_sentiment_score
 
 app = FastAPI(
     title="Recy API",
@@ -94,3 +95,23 @@ async def crypto_news(coin_id: str):
     news = await get_crypto_news(coin_id)
 
     return news
+
+@app.get("/api/crypto/{coin_id}/sentiment")
+async def crypto_sentiment(coin_id: str):
+
+    news = await get_crypto_news(coin_id)
+
+    articles = news["articles"]
+
+    sentiment_results = analyze_news_sentiment(articles)
+
+    sentiment_score = calculate_sentiment_score(
+        sentiment_results
+    )
+
+    return {
+        "coin_id": coin_id,
+        "total_articles": len(sentiment_results),
+        "sentiment": sentiment_score,
+        "articles": sentiment_results
+    }
