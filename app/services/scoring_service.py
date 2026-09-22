@@ -113,3 +113,39 @@ def calculate_technical_score(data: dict) -> dict:
         "technical_score": technical_score,
         "condition": condition
     }
+
+def calculate_final_score(
+    technical_score: float,
+    sentiment_score: float
+) -> dict:
+
+    final_score = (
+        (technical_score * 0.60) +
+        (sentiment_score * 0.40)
+    )
+
+    final_score = round(final_score, 2)
+
+    if final_score >= 70:
+        recommendation = "BUY"
+
+    elif final_score < 30:
+        recommendation = "SELL"
+
+    else:
+        recommendation = "HOLD"
+
+    if final_score >= 60:
+        condition = "BULLISH"
+
+    elif final_score >= 40:
+        condition = "NEUTRAL"
+
+    else:
+        condition = "BEARISH"
+
+    return {
+        "final_score": final_score,
+        "condition": condition,
+        "recommendation": recommendation
+    }

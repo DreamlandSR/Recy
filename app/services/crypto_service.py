@@ -85,3 +85,46 @@ async def get_coin_history(coin_id: str):
     response.raise_for_status()
 
     return response.json()
+
+async def get_coin_list():
+    url = f"{BASE_URL}/coins/list"
+
+    headers = {
+        "x-cg-demo-api-key": COINGECKO_API_KEY
+    }
+
+    async with httpx.AsyncClient(
+        trust_env=False,
+        timeout=30.0
+    ) as client:
+
+        response = await client.get(
+            url,
+            headers=headers
+        )
+
+    response.raise_for_status()
+
+    return response.json()
+
+async def resolve_coin_id(query: str):
+    coins = await get_coin_list()
+
+    query = query.strip().lower()
+
+    # 1. Cari berdasarkan ID
+    for coin in coins:
+        if coin["id"].lower() == query:
+            return coin["id"]
+
+    # 2. Cari berdasarkan nama
+    for coin in coins:
+        if coin["name"].lower() == query:
+            return coin["id"]
+
+    # 3. Cari berdasarkan symbol
+    for coin in coins:
+        if coin["symbol"].lower() == query:
+            return coin["id"]
+
+    return None
