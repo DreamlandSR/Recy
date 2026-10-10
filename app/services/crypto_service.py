@@ -62,16 +62,18 @@ async def get_coin_detail(coin_id: str):
 
     return response.json()
 
-async def get_coin_history(coin_id: str):
+async def get_coin_history(coin_id: str, days: str = "90", with_api_key: bool = True):
     url = f"{BASE_URL}/coins/{coin_id}/market_chart"
 
-    headers = {
-        "x-cg-demo-api-key": COINGECKO_API_KEY
-    }
+    headers = {}
+    if with_api_key and COINGECKO_API_KEY:
+        headers = {
+            "x-cg-demo-api-key": COINGECKO_API_KEY
+        }
 
     params = {
         "vs_currency": "usd",
-        "days": "90",
+        "days": str(days),
         "interval": "daily"
     }
 

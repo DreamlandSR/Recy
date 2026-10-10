@@ -1,0 +1,86 @@
+{
+ "status": "ok",
+ "date": "2026-09-15",
+ "articles": [
+  {
+   "title": "Wall Street Bets on Fed Rate Hike: Here's What It Means for Bitcoin, Bonds and Trump",
+   "description": "Nearly every major bank now expects the Fed to raise rates for the first time in three years. Markets have mostly priced it in, but the political fallout could run deeper than one hike.",
+   "url": "https://decrypt.co/378306/wall-street-fed-rate-hike-bitcoin-bonds-trump",
+   "source": "Decrypt",
+   "published_at": "2026-09-15T21:46:03Z",
+   "image": "https://cdn.decrypt.co/resize/1024/height/512/wp-content/uploads/2025/08/Federal-Reserve-Bank-gID_7.jpg"
+  },
+  {
+   "title": "BIS Paper Flags Large Mismatch in Bitcoin On-Chain Transfer Data",
+   "description": "New research from the Bank for International Settlements (BIS) suggests many of the headline metrics used to describe crypto activity—especially onchain",
+   "url": "https://www.cryptobreaking.com/bis-paper-flags-large-mismatch/",
+   "source": "Crypto Breaking News",
+   "published_at": "2026-09-15T21:41:55Z",
+   "image": "https://www.cryptobreaking.com/wp-content/uploads/2026/09/BIS-Paper-Flags-Large-Mismatch-in-Bitcoin-On-Chain-Transfer-Data.jpg"
+  },
+  {
+   "title": "BIS Study Finds Major Discrepancies in Bitcoin Onchain Metrics",
+   "description": "BIS researchers found major discrepancies in crypto data, from Bitcoin transfer values and market capitalization to stablecoin volumes across different blockchains.",
+   "url": "https://cointelegraph.com/news/bis-paper-finds-major-gap-in-bitcoin-onchain-transfer-estimates",
+   "source": "Cointelegraph",
+   "published_at": "2026-09-15T21:23:00Z",
+   "image": "https://s3-images.ctmedia.io/media/article-covers/2026/09/01M2KD2EQC101MZQX67TJ3JJQB/hi-statistical-indicators-for-crypto-investments.png"
+  },
+  {
+   "title": "Bitcoin, BTC-Related Stocks Tumble After Senate Blocks Clarity Act",
+   "description": "Lawmakers blocked the crypto market structure bill from going forward on Tuesday and Bitcoin slid fast.",
+   "url": "https://bitcoinmagazine.com/news/bitcoin-tumbles-after-clarity-act-blockage",
+   "source": "Bitcoin Magazine",
+   "published_at": "2026-09-15T21:22:44Z",
+   "image": "https://bitcoinmagazine.com/wp-content/uploads/2026/09/Pics-22.jpg"
+  },
+  {
+   "title": "BitBox adds Lightning wallet without a new backup phrase",
+   "description": "BitBox adds a self-custody Lightning wallet to its mobile app, using existing backups and Spark to simplify everyday Bitcoin payments.",
+   "url": "https://crypto.news/bitbox-adds-lightning-wallet-without-new-backup-phrase/",
+   "source": "Crypto News",
+   "published_at": "2026-09-15T20:48:24Z",
+   "image": "https://media.crypto.news/2024/09/crypto-news-crypto-wallet-option01.webp"
+  },
+  {
+   "title": "Coinbase, Circle Drop 10% After CLARITY Act Vote",
+   "description": "Crypto stocks fell after the CLARITY Act failed to advance in the US Senate, with Circle and Coinbase down about 10% as Bitcoin briefly slipped below $75,000.",
+   "url": "https://cointelegraph.com/markets/crypto-stocks-slide-after-clarity-act-fails-to-advance-in-senate",
+   "source": "Cointelegraph",
+   "published_at": "2026-09-15T20:37:34Z",
+   "image": "https://s3-images.ctmedia.io/media/article-covers/2026/09/01M2KBJH6XJV6JTEGJY5Q2A9NA/hi-intel-research.png"
+  },
+  {
+   "title": "Key upgrade compatibility checks",
+   "description": "Bitcoin Core v32 RC1 brings PSBTv2 defaults, fee estimation changes and HTTP limits. Operators face compatibility and rollback checks before final release.",
+   "url": "https://cryptoslate.com/a-major-bitcoin-core-update-changes-default-wallet-protocols-risking-temporary-disruption-across-popular-apps/",
+   "source": "CryptoSlate",
+   "published_at": "2026-09-15T19:50:39Z",
+   "image": "https://cryptoslate.com/wp-content/uploads/2026/09/bitcoin-core-compatibility-check.webp"
+  },
+  {
+   "title": "Cryptocurrencies Extend Slide With Clarity Act on Track to Fail",
+   "description": "Crypto’s hopes for a Washington rescue collided with a harsher market reality Tuesday. The likely failure of the long-shot Clarity Act to advance in the Senate removed one of the industry’s few potential catalysts just as renewed anxiety over interest rates bears down on speculative assets, sending Bitcoin sharply lower while hammering crypto-linked stocks.",
+   "url": "https://www.livemint.com/market/cryptocurrencies-extend-slide-with-clarity-act-on-track-to-fail-11789500966056.html",
+   "source": "Livemint",
+   "published_at": "2026-09-15T19:36:05Z",
+   "image": "https://www.livemint.com/lm-img/img/2024/12/06/1600x900/logo/market_2_1733466021722_1733466033367.jpg"
+  },
+  {
+   "title": "Clarity Act Vote Fails. Crypto Stocks, Bitcoin Tumble As Market Structure Stalls.",
+   "description": "Bitcoin, crypto stocks tumbled Tuesday after the Senate failed to advance the Clarity Act, leaving digital asset market structure in limbo.",
+   "url": "https://www.investors.com/news/clarity-act-senate-vote-digital-asset-market-structure-cryptocurrency-bitcoin-ethics-trump/",
+   "source": "Investor's Business Daily",
+   "published_at": "2026-09-15T19:27:57Z",
+   "image": "https://www.investors.com/wp-content/uploads/2018/05/stock-US-Senate-PubDom.jpg"
+  },
+  {
+   "title": "Crypto market sinks as Fed hike odds climb above 92%",
+   "description": "Crypto market value falls over 2% as Bitcoin slips below $76,000 and Fed rate-hike odds exceed 92% before the CLARITY Act vote.",
+   "url": "https://crypto.news/crypto-market-sinks-as-fed-hike-odds-climb-above-92/",
+   "source": "Crypto News",
+   "published_at": "2026-09-15T19:23:24Z",
+   "image": "https://media.crypto.news/2025/04/crypto-news-US-Federal-Reserve-option04.webp"
+  }
+ ]
+}

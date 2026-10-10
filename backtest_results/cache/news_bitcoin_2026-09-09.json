@@ -1,0 +1,86 @@
+{
+ "status": "ok",
+ "date": "2026-09-09",
+ "articles": [
+  {
+   "title": "Bitcoin Wallet Maker Trezor Says Hackers Breached Its Email Provider",
+   "description": "The hardware wallet maker said a fake security alert claimed a hardware flaw could expose users’ recovery phrases.",
+   "url": "https://decrypt.co/377831/bitcoin-wallet-trezor-hackers-breach-email",
+   "source": "Decrypt",
+   "published_at": "2026-09-09T23:02:23Z",
+   "image": "https://cdn.decrypt.co/resize/1024/height/512/wp-content/uploads/2025/10/trezor-safe-7-decrypt-style-gID_7.jpg"
+  },
+  {
+   "title": "Jack Dorsey's Block Seeks US Trust Bank Charter For Bitcoin, Stablecoin",
+   "description": "ZeroHedge - On a long enough timeline, the survival rate for everyone drops to zero",
+   "url": "https://www.zerohedge.com/crypto/jack-dorseys-block-seeks-us-trust-bank-charter-bitcoin-stablecoin",
+   "source": "ZeroHedge",
+   "published_at": "2026-09-09T22:25:00Z",
+   "image": "https://cms.zerohedge.com/s3/files/styles/16_9_max_700/public/2026-09/hi-who-is-jack-dorsey-profile-an.jpg?itok=xsjQT3aw"
+  },
+  {
+   "title": "Focused Company To Apply For Charter",
+   "description": "Block wants the banking license so it can open Builders Bank, which would provide custody and related fiduciary services for bitcoin.",
+   "url": "https://bitcoinmagazine.com/news/block-applies-for-banking-charter",
+   "source": "Bitcoin Magazine",
+   "published_at": "2026-09-09T20:35:41Z",
+   "image": "https://bitcoinmagazine.com/wp-content/uploads/2026/07/Bitcoin-Maxi-Jack-Dorsey-Unveils-Chat-App.jpg"
+  },
+  {
+   "title": "Bitcoin misses $80K as Bessent-driven yen strength hits $153",
+   "description": "Bitcoin traded in a cautious range under $80,000 on Wednesday, weighed by a broader risk-off mood driven by escalating tensions tied to Iranian oil",
+   "url": "https://www.cryptobreaking.com/bitcoin-misses-80k-as-bessent/",
+   "source": "Crypto Breaking News",
+   "published_at": "2026-09-09T20:12:30Z",
+   "image": "https://www.cryptobreaking.com/wp-content/uploads/2026/09/Bitcoin-misses-80K-as-Bessent-driven-yen-strength-hits-153.jpg"
+  },
+  {
+   "title": "Bitcoin price risks $70K if $78K neckline breaks",
+   "description": "Bitcoin price holds near $78,500 as weak momentum, liquidation clusters and a possible head-and-shoulders pattern put $70,000 in focus.",
+   "url": "https://crypto.news/bitcoin-price-risks-70k-if-78k-neckline-breaks/",
+   "source": "Crypto News",
+   "published_at": "2026-09-09T19:58:50Z",
+   "image": "https://media.crypto.news/2026/06/BTCnew3.webp"
+  },
+  {
+   "title": "Binance New Listing Sends MARSCOIN Up 288% as Pepeto Buyers Eye Their Turn",
+   "description": "Discover the potential of Binance new listings, such as MarsCoin, to generate massive returns while Bitcoin lags behind.",
+   "url": "https://techbullion.com/binance-new-listing-sends-marscoin-up-288-as-pepeto-buyers-eye-their-turn/",
+   "source": "TechBullion",
+   "published_at": "2026-09-09T19:30:10Z",
+   "image": "https://techbullion.com/wp-content/uploads/2026/07/BNB-JULY-17-1000x600.jpg"
+  },
+  {
+   "title": "Steak 'n Shake Says Sales Grew Double Digits Since Bitcoin Adoption",
+   "description": "Burger franchise Steak 'n Shake started accepting bitcoin over Lightning last year and claims business is booming.",
+   "url": "https://bitcoinmagazine.com/news/steak-n-shake-says-sales-grew",
+   "source": "Bitcoin Magazine",
+   "published_at": "2026-09-09T18:37:31Z",
+   "image": "https://bitcoinmagazine.com/wp-content/uploads/2026/09/Pics-14.jpg"
+  },
+  {
+   "title": "Ripple CTO Emeritus Makes Bold Prediction",
+   "description": "Ripple CTO Emeritus David Schwartz says XRP could flip Bitcoin as XRP ETFs post the only positive inflows during Tuesday's crypto sell-off.",
+   "url": "https://coingape.com/ripple-cto-emeritus-david-schwartz-declares-xrp-will-overtake-bitcoin-soon/",
+   "source": "CoinGape",
+   "published_at": "2026-09-09T18:30:20Z",
+   "image": "https://coingape.com/wp-content/uploads/2026/05/ripple_former_cto_breaks_silence-1.webp"
+  },
+  {
+   "title": "Iran Continues Using Bitcoin To Keep Economy Stable",
+   "description": "Rumors of Iran using bitcoin to skirt transactions have been abound for some time now. Business and regime insiders have reportedly said it's a tried and tested method.",
+   "url": "https://bitcoinmagazine.com/news/iran-still-using-bitcoin-to-help-economy",
+   "source": "Bitcoin Magazine",
+   "published_at": "2026-09-09T18:23:22Z",
+   "image": "https://bitcoinmagazine.com/wp-content/uploads/2026/07/US-Closes-In-of-Irans-Bitcoin-Insurance-Policy-in-strait-of-hormuz.jpg"
+  },
+  {
+   "title": "Germany Wants To End Bitcoin's Tax-Free Perk. Long-Term Holders Could Soon Face A 26% Tax.",
+   "description": "Crypto bought before the end of 2026 would keep Germany's existing treatment, while newer holdings would be taxed regardless of how long investors keep them.",
+   "url": "https://www.ibtimes.com/germany-wants-end-bitcoins-tax-free-perk-long-term-holders-could-soon-face-26-tax-3807299",
+   "source": "International Business Times",
+   "published_at": "2026-09-09T18:17:29Z",
+   "image": "https://d.ibtimes.com/en/full/4633147/bitcoin.jpg"
+  }
+ ]
+}

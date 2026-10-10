@@ -1,0 +1,14 @@
+{
+ "coin_id": "binancecoin",
+ "source": "gnews.io + ProsusAI/finbert",
+ "fetched_at": "2026-10-09T03:16:04.018616+00:00",
+ "start": "2026-09-09",
+ "end": "2026-10-08",
+ "series": {},
+ "coverage": {
+  "days_requested": 30,
+  "days_fetched": 0,
+  "days_with_articles": 0,
+  "quota_exhausted": true
+ }
+}

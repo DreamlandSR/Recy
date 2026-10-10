@@ -1,0 +1,86 @@
+{
+ "status": "ok",
+ "date": "2026-10-04",
+ "articles": [
+  {
+   "title": "How Much Crypto Should You Own at Different Ages?",
+   "description": "Traditional age-based investing rules were built for stocks and bonds, but Bitcoin plays by completely different rules, and getting the allocation wrong at",
+   "url": "https://www.europesays.com/3290414/",
+   "source": "EUROPE SAYS",
+   "published_at": "2026-10-04T23:29:25Z",
+   "image": "https://www.europesays.com/wp-content/uploads/2026/10/shutterstock-1935886804-huge-licensed-scaled.jpg"
+  },
+  {
+   "title": "Former SEC Boss Made AI Czar, Bitcoin May Hit $600K This Cycle: Hodler’s Digest",
+   "description": "Jay Clayton prosecuted Roman Storm and XRP — now he’s President Trump’s new AI Czar. Peter Brandt says the Bitcoin bull market has “very good chance of reaching half a million.”",
+   "url": "https://cointelegraph.com/magazine/former-sec-boss-made-ai-czar-bitcoin-may-hit-600k-this-cycle-hodlers-digest",
+   "source": "Cointelegraph",
+   "published_at": "2026-10-04T22:31:12Z",
+   "image": "https://s3-images.ctmedia.io/media/article-covers/2026/10/01M44CDHE2CKEJ0000STF6RMVM/october-2-collage-cover.png"
+  },
+  {
+   "title": "Bitcoin recovery awaits ETF demand after payrolls",
+   "description": "Bitcoin’s $85,000 recovery lacks a complete Friday ETF flow tally. Thursday buying and Monday’s services data frame the next demand test.",
+   "url": "https://cryptoslate.com/bitcoins-85000-recovery-awaits-proof-that-etf-investors-kept-buying-after-payrolls/",
+   "source": "CryptoSlate",
+   "published_at": "2026-10-04T20:45:36Z",
+   "image": "https://cryptoslate.com/wp-content/uploads/2026/10/bitcoin-market-tug.webp"
+  },
+  {
+   "title": "Bitcoin Core’s new fix closes gap that could redirect funds without stealing keys",
+   "description": "Bitcoin Core will now refuse certain malformed PSBT signing requests where the matching transaction output is missing.",
+   "url": "https://cryptoslate.com/bitcoin-cores-new-fix-closes-gap-that-could-redirect-funds-without-stealing-keys/",
+   "source": "CryptoSlate",
+   "published_at": "2026-10-04T19:40:34Z",
+   "image": "https://cryptoslate.com/wp-content/uploads/2026/10/psbt-output-check-v2.webp"
+  },
+  {
+   "title": "Crypto News: Is the Price of Bitcoin Signalling a Crypto Crash Before Bull Run as AlphaPepe Targets 100x Upside?",
+   "description": "Bitcoin has climbed back toward $86,000 after a strong third-quarter recovery, but the market still cannot decide whether the next move is a breakout or another shakeout. BTC remains well below its 2025 record above $126,000",
+   "url": "https://techbullion.com/crypto-news-is-the-price-of-bitcoin-signalling-a-crypto-crash-before-bull-run-as-alphapepe-targets-100x-upside/",
+   "source": "TechBullion",
+   "published_at": "2026-10-04T17:58:25Z",
+   "image": "https://techbullion.com/wp-content/uploads/2026/10/Picture1-6.png"
+  },
+  {
+   "title": "Bitcoin's future will be decided by how the dollar is repaired, not by bitcoin",
+   "description": "ZeroHedge - On a long enough timeline, the survival rate for everyone drops to zero",
+   "url": "https://www.zerohedge.com/news/2026-10-04/bitcoins-future-will-be-decided-how-dollar-repaired-not-bitcoin",
+   "source": "ZeroHedge",
+   "published_at": "2026-10-04T16:03:00Z",
+   "image": "https://assets.zerohedge.com/s3fs-public/styles/16_9_max_700/public/contributor-teasers/2026/10/P-51.jpg?itok=qHf5VaMJ"
+  },
+  {
+   "title": "'Uptober' Starts Green as Bitcoin ETFs Draw $134 Million",
+   "description": "Spot Bitcoin ETFs took in $134.4 million over the first two trading days of October, rebounding from a Sept. 30 outflow as a weak jobs report cooled Fed rate-hike bets.",
+   "url": "https://decrypt.co/380007/uptober-starts-green-bitcoin-etfs-draw-134-million",
+   "source": "Decrypt",
+   "published_at": "2026-10-04T15:01:03Z",
+   "image": "https://cdn.decrypt.co/resize/1024/height/512/wp-content/uploads/2025/05/Bitcoin-decrypt-style-05-gID_7.png"
+  },
+  {
+   "title": "Michael Saylor’s Strategy hints at another big Bitcoin buy",
+   "description": "Michael Saylor has hinted at another Strategy Bitcoin purchase after the company raised its holdings to 847,666 BTC with a $143M buy.",
+   "url": "https://crypto.news/strategy-hints-at-another-big-bitcoin-buy/",
+   "source": "Crypto News",
+   "published_at": "2026-10-04T14:38:11Z",
+   "image": "https://media.crypto.news/2025/01/crypto-news-Michael-Saylor-MicroStrategy-option04.webp"
+  },
+  {
+   "title": "3x Bitcoin and Ether futures funds clear SEC listing hurdle",
+   "description": "The SEC cleared Cboe BZX’s listing path for 3x Bitcoin and Ether funds. Their daily futures target is no promise of triple long-term returns.",
+   "url": "https://cryptoslate.com/3x-bitcoin-and-ether-futures-funds-clear-sec-listing-hurdle/",
+   "source": "CryptoSlate",
+   "published_at": "2026-10-04T14:20:32Z",
+   "image": "https://cryptoslate.com/wp-content/uploads/2026/10/3x-crypto-start-line.webp"
+  },
+  {
+   "title": "'More Orange Than Ever': Michael Saylor Hints at Massive New Bitcoin Buy",
+   "description": "As MSTR trades at a 14% premium, Michael Saylor hints at a massive new Bitcoin maneuver for Strategy.",
+   "url": "https://u.today/more-orange-than-ever-michael-saylor-hints-at-massive-new-bitcoin-buy",
+   "source": "U.Today",
+   "published_at": "2026-10-04T14:07:05Z",
+   "image": "https://u.today/sites/default/files/styles/twitterwithoutlogo/public/2026-10/Depositphotos_800334996_S.jpg"
+  }
+ ]
+}

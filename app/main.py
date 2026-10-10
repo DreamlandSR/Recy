@@ -42,20 +42,22 @@ async def crypto_history(coin_id: str):
     return await get_coin_history(coin_id)
 
 @app.get("/api/crypto/{coin_id}/technical")
-async def crypto_technical(coin_id: str):
-    history = await get_coin_history(coin_id)
+async def crypto_technical(coin_id: str, days: int = 365):
+    history = await get_coin_history(coin_id, days=days)
 
     prices = history["prices"]
+    volumes = history.get("total_volumes") or []
 
-    return calculate_sma_ema(prices)
+    return calculate_sma_ema(prices, volumes)
 
 @app.get("/api/crypto/{coin_id}/technical/score")
-async def crypto_technical_score(coin_id: str):
-    history = await get_coin_history(coin_id)
+async def crypto_technical_score(coin_id: str, days: int = 365):
+    history = await get_coin_history(coin_id, days=days)
 
     prices = history["prices"]
+    volumes = history.get("total_volumes") or []
 
-    technical_data = calculate_sma_ema(prices)
+    technical_data = calculate_sma_ema(prices, volumes)
 
     latest_data = technical_data[-1]
 
@@ -68,13 +70,14 @@ async def crypto_technical_score(coin_id: str):
     }
     
 @app.get("/api/crypto/{coin_id}/recommendation")
-async def crypto_recommendation(coin_id: str):
+async def crypto_recommendation(coin_id: str, days: int = 365):
 
-    history = await get_coin_history(coin_id)
+    history = await get_coin_history(coin_id, days=days)
 
     prices = history["prices"]
+    volumes = history.get("total_volumes") or []
 
-    technical_data = calculate_sma_ema(prices)
+    technical_data = calculate_sma_ema(prices, volumes)
 
     latest_data = technical_data[-1]
 
@@ -82,7 +85,8 @@ async def crypto_recommendation(coin_id: str):
 
     recommendation = generate_recommendation(
         technical_score["technical_score"],
-        technical_score["condition"]
+        technical_score["condition"],
+        trend_filter_ok=technical_score["trend_filter_ok"]
     )
 
     return {
@@ -119,7 +123,7 @@ async def crypto_sentiment(coin_id: str):
     }
 
 @app.get("/api/crypto/{coin_id}/analysis")
-async def crypto_analysis(coin_id: str):
+async def crypto_analysis(coin_id: str, days: int = 365):
 
     resolved_coin_id = await resolve_coin_id(coin_id)
 
@@ -129,11 +133,12 @@ async def crypto_analysis(coin_id: str):
             detail=f"Coin '{coin_id}' tidak ditemukan di CoinGecko."
         )
 
-    history = await get_coin_history(resolved_coin_id)
+    history = await get_coin_history(resolved_coin_id, days=days)
 
     prices = history["prices"]
+    volumes = history.get("total_volumes") or []
 
-    technical_data = calculate_sma_ema(prices)
+    technical_data = calculate_sma_ema(prices, volumes)
 
     latest_data = technical_data[-1]
 

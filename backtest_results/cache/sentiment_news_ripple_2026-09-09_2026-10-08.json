@@ -1,0 +1,65 @@
+{
+ "coin_id": "ripple",
+ "source": "gnews.io + ProsusAI/finbert",
+ "fetched_at": "2026-10-09T03:16:21.053331+00:00",
+ "start": "2026-09-09",
+ "end": "2026-10-08",
+ "series": {
+  "2026-09-09": {
+   "score": 51.38,
+   "condition": "NEUTRAL",
+   "n_articles": 9
+  },
+  "2026-09-10": {
+   "score": 32.4,
+   "condition": "BEARISH",
+   "n_articles": 10
+  },
+  "2026-09-11": {
+   "score": 62.22,
+   "condition": "BULLISH",
+   "n_articles": 10
+  },
+  "2026-09-12": {
+   "score": 48.37,
+   "condition": "NEUTRAL",
+   "n_articles": 7
+  },
+  "2026-09-13": {
+   "score": 54.43,
+   "condition": "NEUTRAL",
+   "n_articles": 6
+  },
+  "2026-09-14": {
+   "score": 68.03,
+   "condition": "BULLISH",
+   "n_articles": 2
+  },
+  "2026-09-15": {
+   "score": 65.02,
+   "condition": "BULLISH",
+   "n_articles": 10
+  },
+  "2026-09-16": {
+   "score": 57.08,
+   "condition": "NEUTRAL",
+   "n_articles": 10
+  },
+  "2026-09-17": {
+   "score": 50.57,
+   "condition": "NEUTRAL",
+   "n_articles": 10
+  },
+  "2026-09-18": {
+   "score": 38.78,
+   "condition": "BEARISH",
+   "n_articles": 4
+  }
+ },
+ "coverage": {
+  "days_requested": 30,
+  "days_fetched": 10,
+  "days_with_articles": 10,
+  "quota_exhausted": true
+ }
+}
