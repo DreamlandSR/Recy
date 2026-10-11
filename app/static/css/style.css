@@ -1,0 +1,285 @@
+/* ==========================================================================
+   Recy Crypto Intelligence Terminal — Dark Obsidian Theme
+   ========================================================================== */
+
+:root {
+  --bg-0: #0B0E14;
+  --bg-1: #121824;
+  --surface: rgba(26, 34, 52, 0.82);
+  --surface-solid: #1A2234;
+  --border: #26324A;
+  --bull: #00E599;
+  --bull-2: #10B981;
+  --bear: #FF3B69;
+  --bear-2: #EF4444;
+  --amber: #F59E0B;
+  --cyan: #00D8FF;
+  --text: #E6EBF5;
+  --muted: #8A94A8;
+  --radius: 16px;
+}
+
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background:
+    radial-gradient(1100px 500px at 85% -10%, rgba(0, 216, 255, 0.07), transparent 60%),
+    radial-gradient(900px 480px at -10% 0%, rgba(0, 229, 153, 0.06), transparent 55%),
+    linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: "Inter", system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+h1, h2, h3, .font-display { font-family: "Outfit", "Inter", sans-serif; }
+
+/* ---------- Glass card ---------- */
+.glass {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.38);
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.glass-hover:hover {
+  transform: translateY(-2px);
+  border-color: #33436b;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------- Live indicator ---------- */
+.live-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--bull);
+  box-shadow: 0 0 0 0 rgba(0, 229, 153, 0.55);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 229, 153, 0.55); }
+  70% { box-shadow: 0 0 0 9px rgba(0, 229, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 229, 153, 0); }
+}
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 11px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.4px;
+  border: 1px solid transparent;
+}
+
+.badge-buy  { color: var(--bull);  background: rgba(0, 229, 153, 0.10);  border-color: rgba(0, 229, 153, 0.35);  box-shadow: 0 0 14px rgba(0, 229, 153, 0.22); }
+.badge-sell { color: var(--bear);  background: rgba(255, 59, 105, 0.10); border-color: rgba(255, 59, 105, 0.35); box-shadow: 0 0 14px rgba(255, 59, 105, 0.22); }
+.badge-hold { color: var(--amber); background: rgba(245, 158, 11, 0.10); border-color: rgba(245, 158, 11, 0.35); }
+.badge-bull { color: var(--bull);  background: rgba(0, 229, 153, 0.08);  border-color: rgba(0, 229, 153, 0.28); }
+.badge-bear { color: var(--bear);  background: rgba(255, 59, 105, 0.08); border-color: rgba(255, 59, 105, 0.28); }
+.badge-neutral { color: var(--amber); background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.28); }
+.badge-cyan { color: var(--cyan); background: rgba(0, 216, 255, 0.08); border-color: rgba(0, 216, 255, 0.30); }
+
+/* ---------- Watchlist table ---------- */
+.wl-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+
+.wl-table th {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 1.1px;
+  color: var(--muted); font-weight: 600;
+  padding: 10px 14px; text-align: left; white-space: nowrap;
+}
+
+.wl-table td {
+  padding: 13px 14px; font-size: 13.5px; white-space: nowrap;
+  border-top: 1px solid rgba(38, 50, 74, 0.55);
+}
+
+.wl-row { cursor: pointer; transition: background 0.18s ease; }
+.wl-row:hover { background: rgba(0, 216, 255, 0.045); }
+.wl-row.selected {
+  background: linear-gradient(90deg, rgba(0, 216, 255, 0.10), rgba(0, 216, 255, 0.02));
+  box-shadow: inset 3px 0 0 var(--cyan);
+}
+
+.coin-icon {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: var(--bg-0); border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+/* ---------- Score gauge (radial) ---------- */
+.gauge {
+  --pct: 0;
+  --gauge-color: var(--cyan);
+  width: 116px; height: 116px; border-radius: 50%;
+  background:
+    radial-gradient(closest-side, var(--bg-1) 78%, transparent 79% 100%),
+    conic-gradient(var(--gauge-color) calc(var(--pct) * 1%), rgba(38, 50, 74, 0.6) 0);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  transition: --pct 0.6s ease;
+}
+
+/* ---------- Component bars ---------- */
+.bar-track {
+  height: 7px; border-radius: 999px;
+  background: rgba(38, 50, 74, 0.65); overflow: hidden;
+}
+.bar-fill {
+  height: 100%; border-radius: 999px; width: 0;
+  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ---------- Execution card ---------- */
+.plan-banner {
+  border-radius: 12px; padding: 13px 16px;
+  font-weight: 700; letter-spacing: 0.4px;
+  display: flex; align-items: center; gap: 10px;
+}
+.plan-buy  { background: linear-gradient(90deg, rgba(0, 229, 153, 0.16), rgba(16, 185, 129, 0.05)); color: var(--bull); border: 1px solid rgba(0, 229, 153, 0.4); }
+.plan-hold { background: linear-gradient(90deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.04)); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.4); }
+.plan-sell { background: linear-gradient(90deg, rgba(255, 59, 105, 0.16), rgba(239, 68, 68, 0.05)); color: var(--bear); border: 1px solid rgba(255, 59, 105, 0.4); }
+
+.level-box {
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 14px; background: rgba(11, 14, 20, 0.5);
+  transition: border-color 0.25s ease;
+}
+.level-box:hover { border-color: #33436b; }
+.level-sl { border-left: 3px solid var(--bear); }
+.level-tp { border-left: 3px solid var(--bull); }
+
+/* ---------- News feed ---------- */
+.news-item {
+  padding: 12px 4px; border-top: 1px solid rgba(38, 50, 74, 0.5);
+  transition: background 0.18s ease; border-radius: 10px;
+}
+.news-item:first-child { border-top: none; }
+.news-item:hover { background: rgba(0, 216, 255, 0.04); }
+.news-item a { color: var(--text); text-decoration: none; }
+.news-item a:hover { color: var(--cyan); }
+
+/* ---------- Buttons & misc ---------- */
+.btn-analyze {
+  border: 1px solid rgba(0, 216, 255, 0.35); color: var(--cyan);
+  background: rgba(0, 216, 255, 0.06); border-radius: 9px;
+  padding: 6px 12px; font-size: 12px; font-weight: 600;
+  transition: all 0.2s ease; cursor: pointer;
+}
+.btn-analyze:hover { background: rgba(0, 216, 255, 0.16); box-shadow: 0 0 16px rgba(0, 216, 255, 0.25); }
+
+.ticker-price { font-variant-numeric: tabular-nums; }
+.num { font-variant-numeric: tabular-nums; }
+
+.fade-up { animation: fadeUp 0.45s ease both; }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, rgba(38, 50, 74, 0.35) 25%, rgba(38, 50, 74, 0.65) 50%, rgba(38, 50, 74, 0.35) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 8px; color: transparent;
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+.spin { animation: spin 0.8s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.text-bull { color: var(--bull); }
+.text-bear { color: var(--bear); }
+.text-amber { color: var(--amber); }
+.text-cyan { color: var(--cyan); }
+.text-muted { color: var(--muted); }
+
+/* ---------- Timeframe buttons ---------- */
+.tf-btn {
+  border: 1px solid var(--border); color: var(--muted);
+  background: rgba(11, 14, 20, 0.5); border-radius: 8px;
+  padding: 4px 12px; font-size: 12px; font-weight: 600;
+  transition: all 0.2s ease; cursor: pointer;
+}
+.tf-btn:hover { color: var(--text); border-color: #33436b; }
+.tf-btn.active {
+  color: var(--cyan); border-color: rgba(0, 216, 255, 0.45);
+  background: rgba(0, 216, 255, 0.10);
+  box-shadow: 0 0 12px rgba(0, 216, 255, 0.18);
+}
+
+/* ---------- Search / add coin ---------- */
+.search-input {
+  background: rgba(11, 14, 20, 0.6); border: 1px solid var(--border);
+  border-radius: 9px; padding: 7px 12px; font-size: 12.5px;
+  color: var(--text); width: 270px; max-width: 46vw;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.search-input::placeholder { color: var(--muted); }
+.search-input:focus {
+  outline: none; border-color: rgba(0, 216, 255, 0.5);
+  box-shadow: 0 0 12px rgba(0, 216, 255, 0.15);
+}
+
+/* ---------- Position calculator ---------- */
+.calc-input {
+  background: rgba(11, 14, 20, 0.7); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 9px; font-size: 12.5px;
+  color: var(--text); width: 104px;
+}
+.calc-input:focus { outline: none; border-color: rgba(0, 216, 255, 0.5); }
+select.calc-input { width: auto; cursor: pointer; }
+
+/* ---------- Remove coin (custom) ---------- */
+.wl-remove {
+  margin-left: 8px; color: var(--muted); cursor: pointer;
+  font-size: 11px; transition: color 0.2s ease;
+}
+.wl-remove:hover { color: var(--bear); }
+
+/* ---------- Toast ---------- */
+/* Modal portofolio */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(4, 6, 10, 0.78);
+  backdrop-filter: blur(4px);
+}
+.modal-overlay.hidden { display: none; }
+.modal-card {
+  width: 100%;
+  max-width: 440px;
+  border: 1px solid var(--edge, #26324a);
+  border-radius: 14px;
+  background: #121824;
+  padding: 1.25rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  animation: fadeUp 0.28s ease both;
+}
+
+.toast {
+  position: fixed; right: 20px; bottom: 20px; z-index: 100;
+  max-width: 340px; padding: 12px 16px; border-radius: 12px;
+  background: var(--surface-solid); border: 1px solid var(--border);
+  color: var(--text); font-size: 13px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  opacity: 0; transform: translateY(12px); pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.ok { border-color: rgba(0, 229, 153, 0.45); }
+.toast.err { border-color: rgba(255, 59, 105, 0.45); }
+
+@media (max-width: 900px) {
+  .wl-table th:nth-child(9), .wl-table td:nth-child(9) { display: none; } /* allocation */
+}
