@@ -1,4 +1,8 @@
+import json
 import os
+import time
+
+import httpx
 from dotenv import load_dotenv
 
 from app.services.cache_service import TTLCache, get_json_with_retry
@@ -169,3 +173,207 @@ async def resolve_coin_id(query: str):
             return coin["id"]
 
     return None
+
+
+# ============================================================================
+# Binance public API — harga live real-time (tanpa API key)
+# ============================================================================
+#
+# Data harian CoinGecko (interval: daily) + cache 3-5 menit membuat harga
+# di dashboard tertinggal beberapa menit dari bursa riil. Binance menyediakan
+# endpoint publik GRATIS tanpa API key, rate limit longgar (1.200 req/menit)
+# dan latensi milidetik — dipakai sebagai harga `current_price` live dengan
+# cache sangat pendek (5 detik), sehingga harga di dashboard dan level
+# Stop-Loss / Take-Profit / Trailing Stop ikut bergerak detik per detik.
+# Bila Binance gagal/offline sesaat, hasil kosong -> pemanggil otomatis
+# fallback ke CoinGecko (lihat _watchlist_item / crypto_recommendation).
+
+# Host Binance — utama sesuai spesifikasi (api.binance.com), cadangan host
+# market-data resmi Binance (data-api.binance.vision; API & data identik).
+# Cadangan ini penting: sebagian ISP meng-hijack DNS api.binance.com ke
+# halaman blokir dengan sertifikat self-signed (mis. blockpage.xlaxiata.id).
+BINANCE_HOSTS = (
+    "https://api.binance.com",
+    "https://data-api.binance.vision",
+)
+BINANCE_TICKER_PATH = "/api/v3/ticker/price"
+BINANCE_24H_PATH = "/api/v3/ticker/24hr"
+
+BINANCE_LIVE_TTL = 5.0     # detik — sesuai spesifikasi: hanya 5-10 detik
+BINANCE_24H_TTL = 30.0     # % 24 jam bergerak pelan — 30 detik cukup
+BINANCE_FAIL_TTL = 5.0     # gagal -> coba lagi 5 detik (bukan tiap request)
+BINANCE_TIMEOUT = 4.0      # gagal cepat -> fallback CoinGecko tanpa jeda
+
+# coin_id CoinGecko -> pasangan spot Binance (USDT).
+# Hanya koin yang terdaftar di sini yang mendapat harga live; koin lain
+# otomatis fallback CoinGecko. Daftar diverifikasi langsung terhadap
+# endpoint Binance (satu pasangan tidak ada -> seluruh batch 400 -> semua
+# fallback, jadi jangan menambah simbol yang belum dipastikan ada).
+BINANCE_SYMBOLS = {
+    "bitcoin": "BTCUSDT",
+    "ethereum": "ETHUSDT",
+    "solana": "SOLUSDT",
+    "binancecoin": "BNBUSDT",
+    "ripple": "XRPUSDT",
+    "dogecoin": "DOGEUSDT",
+    "cardano": "ADAUSDT",
+    "sui": "SUIUSDT",
+    "avalanche-2": "AVAXUSDT",
+    "polkadot": "DOTUSDT",
+    "chainlink": "LINKUSDT",
+    "litecoin": "LTCUSDT",
+    "tron": "TRXUSDT",
+    "the-open-network": "TONUSDT",
+    "cosmos": "ATOMUSDT",
+    "algorand": "ALGOUSDT",
+    "ethereum-classic": "ETCUSDT",
+    "stellar": "XLMUSDT",
+    "bitcoin-cash": "BCHUSDT",
+    "pepe": "PEPEUSDT",
+    "shiba-inu": "SHIBUSDT",
+    "hedera-hashgraph": "HBARUSDT",
+    "aptos": "APTUSDT",
+    "arbitrum": "ARBUSDT",
+    "optimism": "OPUSDT",
+    "uniswap": "UNIUSDT",
+    "polygon-ecosystem-token": "POLUSDT",
+    "near": "NEARUSDT",
+    "internet-computer": "ICPUSDT",
+    "filecoin": "FILUSDT",
+    "injective-protocol": "INJUSDT",
+    "aave": "AAVEUSDT",
+    "render-token": "RENDERUSDT",
+    "arweave": "ARUSDT",
+    "worldcoin-wld": "WLDUSDT",
+}
+
+_binance_cache = TTLCache()
+_binance_last_warn = 0.0
+_binance_host_ok = None  # host terakhir berhasil -> diprioritaskan
+
+
+def _warn_binance(where: str, exc: Exception) -> None:
+    """Log gagal (dithrottle 1x/menit) — fallback CoinGecko tetap jalan."""
+    global _binance_last_warn
+    now = time.monotonic()
+    if now - _binance_last_warn >= 60.0:
+        _binance_last_warn = now
+        print(
+            f"[Binance] {where} gagal: {type(exc).__name__}: {exc} "
+            "— memakai harga CoinGecko (fallback).",
+            flush=True,
+        )
+
+
+async def _binance_rows(path: str, tag: str, ttl: float):
+    """Ambil daftar ticker Binance — satu request untuk semua pasangan.
+
+    Mencoba `BINANCE_HOSTS` berurutan (host yang terakhir berhasil duluan).
+    Return list[dict] atau None bila SEMUA host gagal. Kegagalan ikut
+    di-cache singkat (`BINANCE_FAIL_TTL`) agar tidak di-hammer saat
+    offline sesaat.
+    """
+    key = ("binance", tag)
+    cached, hit = _binance_cache.get(key)
+    if hit:
+        return cached
+
+    global _binance_host_ok
+    hosts = BINANCE_HOSTS
+    if _binance_host_ok in BINANCE_HOSTS:
+        hosts = (_binance_host_ok,) + tuple(
+            h for h in BINANCE_HOSTS if h != _binance_host_ok
+        )
+
+    # Format wajib: JSON array tanpa spasi ("symbols=[...]").
+    params = {
+        "symbols": json.dumps(
+            sorted(set(BINANCE_SYMBOLS.values())), separators=(",", ":")
+        )
+    }
+
+    rows = None
+    last_exc = None
+    for host in hosts:
+        try:
+            async with httpx.AsyncClient(trust_env=False, timeout=BINANCE_TIMEOUT) as client:
+                response = await client.get(host + path, params=params)
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, list):
+                raise RuntimeError(f"respons bukan list ({type(data).__name__})")
+            rows = data
+            _binance_host_ok = host
+            break
+        except Exception as exc:  # noqa: BLE001 — harga live bersifat opsional
+            last_exc = exc
+
+    if rows is None and last_exc is not None:
+        _warn_binance(path, last_exc)
+
+    _binance_cache.set(key, rows, ttl if rows is not None else BINANCE_FAIL_TTL)
+    return rows
+
+
+async def get_binance_live_prices(coin_ids=None) -> dict:
+    """Harga live Binance (pasangan USDT) untuk coin_id CoinGecko.
+
+    - Endpoint publik `GET /api/v3/ticker/price` — gratis, tanpa API key,
+      rate limit longgar (1.200 req/menit), respons milidetik.
+    - Cache sangat pendek: hanya `BINANCE_LIVE_TTL` (5 detik) sehingga
+      harga selalu segar / real-time live.
+    - Return {coin_id: harga_float}. Koin tanpa pasangan Binance atau saat
+      Binance gagal -> tidak muncul di hasil ({}), PEMANGGIL WAJIB fallback
+      ke harga CoinGecko — fungsi ini tidak pernah melempar exception.
+    """
+    rows = await _binance_rows(BINANCE_TICKER_PATH, "price", BINANCE_LIVE_TTL)
+    if not rows:
+        return {}
+
+    wanted = list(BINANCE_SYMBOLS) if coin_ids is None else coin_ids
+    by_symbol = {
+        row["symbol"]: row
+        for row in rows
+        if isinstance(row, dict) and row.get("symbol")
+    }
+
+    out = {}
+    for coin_id in wanted:
+        symbol = BINANCE_SYMBOLS.get(coin_id)
+        row = by_symbol.get(symbol)
+        if row is None:
+            continue
+        try:
+            out[coin_id] = float(row["price"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+async def get_binance_24h_changes(coin_ids=None) -> dict:
+    """Perubahan harga 24 jam (%) dari Binance — pendamping header koin.
+
+    Return {coin_id: persen_float} (cache 30 detik); kosong ({}) bila gagal.
+    """
+    rows = await _binance_rows(BINANCE_24H_PATH, "24h", BINANCE_24H_TTL)
+    if not rows:
+        return {}
+
+    wanted = list(BINANCE_SYMBOLS) if coin_ids is None else coin_ids
+    by_symbol = {
+        row["symbol"]: row
+        for row in rows
+        if isinstance(row, dict) and row.get("symbol")
+    }
+
+    out = {}
+    for coin_id in wanted:
+        symbol = BINANCE_SYMBOLS.get(coin_id)
+        row = by_symbol.get(symbol)
+        if row is None:
+            continue
+        try:
+            out[coin_id] = float(row["priceChangePercent"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out

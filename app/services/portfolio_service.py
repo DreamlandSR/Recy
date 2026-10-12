@@ -20,7 +20,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.services.crypto_service import get_coin_history, get_coin_list
+from app.services.crypto_service import (
+    get_coin_history,
+    get_coin_list,
+    get_binance_live_prices,
+)
 from app.services.technical_service import calculate_sma_ema
 from app.services.scoring_service import calculate_technical_score
 from app.services.recommendation_service import generate_recommendation
@@ -110,6 +114,8 @@ async def _live_snapshot(coin_id: str) -> dict:
 
     Memakai pipeline identik dengan watchlist (history 365 hari) sehingga
     cache 5 menit CoinGecko ikut terpakai — panggilan berulang murah.
+    Harga live Binance (cache 5 detik) dipakai bila tersedia sehingga PnL
+    mengambang & status SL/trailing bergerak real-time; fallback CoinGecko.
     """
     history = await get_coin_history(coin_id, days=365)
     prices = history["prices"]
@@ -118,18 +124,26 @@ async def _live_snapshot(coin_id: str) -> dict:
     technical = calculate_sma_ema(prices, volumes)[-1]
     score = calculate_technical_score(technical)
 
+    # Harga live Binance (bila ada) menggantikan harga harian CoinGecko.
+    live = await get_binance_live_prices([coin_id])
+    live_price = live.get(coin_id)
+    price = float(live_price) if live_price else float(technical["price"])
+    price_source = "binance" if live_price else "coingecko"
+
     recommendation = generate_recommendation(
         score["technical_score"],
         score["condition"],
         trend_filter_ok=score["trend_filter_ok"],
         coin_id=coin_id,
-        current_price=technical["price"],
+        current_price=price,
         atr_14=technical.get("atr_14"),
+        price_source=price_source,
     )
     execution = recommendation["execution"]
 
     return {
         "current_price": float(execution["current_price"]),
+        "price_source": price_source,
         "sl_price": float(execution["stop_loss_price"]),
         "tp_price": float(execution["take_profit_price"]),
         "sl_distance_pct": float(execution.get("sl_distance_pct") or 0.0),
@@ -180,6 +194,7 @@ async def _enrich(position: dict, meta: dict) -> dict:
     value = price * amount
 
     out["current_price"] = price
+    out["price_source"] = snap.get("price_source")
     out["floating_pnl_usd"] = value - cost
     out["floating_pnl_pct"] = ((price / buy) - 1) * 100 if buy > 0 else 0.0
     out["sl_price"] = snap["sl_price"]

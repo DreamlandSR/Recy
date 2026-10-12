@@ -1,6 +1,8 @@
 /* ==========================================================================
    Recy Crypto Intelligence Terminal — frontend (vanilla JS, zero build)
    - Watchlist  : GET /api/crypto/dashboard/watchlist      (poll 45 dtk)
+   - Live price : GET /api/crypto/live-prices              (poll 5 dtk — harga
+     Binance real-time + SL/TP terhitung ulang dari harga live)
    - Chart      : GET /api/crypto/{id}/history             (cache BE 5 mnt)
    - Gauges     : GET /api/crypto/{id}/technical/score
    - Exec+News  : GET /api/crypto/{id}/analysis            (FinBERT)
@@ -12,6 +14,7 @@
 const POLL_WATCHLIST_MS = 45_000;
 const POLL_DETAIL_MS = 60_000;      // history + technical (murah, di-cache)
 const POLL_ANALYSIS_MS = 300_000;   // execution + news (FinBERT)
+const POLL_LIVE_MS = 5_000;         // harga live Binance (detik per detik)
 
 const TIMEFRAMES = { "7D": 7, "30D": 30, "90D": 90, "1Y": 365 };
 const DEFAULT_COINS = ["bitcoin", "ethereum", "solana", "binancecoin", "ripple"];
@@ -119,7 +122,7 @@ function toast(msg, kind = "ok") {
   toastTimer = setTimeout(() => { el.className = "toast"; }, 4200);
 }
 
-/* ---------------- 1. FNG + Ticker ---------------- */
+/* ---------------- 1. FNG ---------------- */
 
 async function loadFng() {
   try {
@@ -132,39 +135,6 @@ async function loadFng() {
     $("#fng-value").textContent = "N/A";
     console.warn("FNG:", err.message);
   }
-}
-
-function renderTicker() {
-  const picks = ["bitcoin", "ethereum", "solana"]
-    .map((id) => state.coins.find((c) => c.coin_id === id))
-    .filter(Boolean);
-
-  $("#ticker").innerHTML = picks
-    .map((c) => {
-      const up = c.trend === "BULLISH";
-      const flat = c.trend === "NEUTRAL";
-      const accent = flat ? "var(--amber)" : up ? "var(--bull)" : "var(--bear)";
-      return `
-      <div class="glass glass-hover flex items-center justify-between p-4 cursor-pointer"
-           data-coin="${esc(c.coin_id)}">
-        <div class="flex items-center gap-3">
-          ${coinIcon(c.symbol)}
-          <div>
-            <div class="font-bold">${esc(c.symbol)}</div>
-            <div class="text-[11px] text-muted">${esc(c.name)}</div>
-          </div>
-        </div>
-        <div class="text-right">
-          <div class="ticker-price text-lg font-bold" style="color:${accent}">$${fmtPrice(c.price)}</div>
-          <div class="mt-1 flex justify-end gap-1">${REC_BADGE[c.recommendation] || ""}</div>
-        </div>
-      </div>`;
-    })
-    .join("");
-
-  document.querySelectorAll("#ticker [data-coin]").forEach((el) =>
-    el.addEventListener("click", () => selectCoin(el.dataset.coin))
-  );
 }
 
 /* ---------------- 2. Watchlist ---------------- */
@@ -195,12 +165,18 @@ async function loadWatchlist() {
       .filter((id) => !DEFAULT_COINS.includes(id) && !errored.has(id));
     saveCustomCoins();
 
-    renderTicker();
     renderWatchlist();
     $("#wl-updated").textContent = `updated ${new Date().toLocaleTimeString("id-ID")}`;
+
+    // Auto-pilih koin pertama saat belum ada yang dipilih — tampilan
+    // terminal selalu penuh, pengguna tinggal klik koin lain untuk berganti.
+    if (!state.selected) {
+      const first = state.coins.find((c) => !c.error);
+      if (first) selectCoin(first.coin_id);
+    }
   } catch (err) {
     $("#watchlist-body").innerHTML =
-      `<tr><td colspan="10" class="p-8 text-center text-bear">
+      `<tr><td colspan="6" class="p-6 text-center text-bear">
          <i class="fa-solid fa-circle-exclamation mr-2"></i>Gagal memuat watchlist: ${esc(err.message)}
        </td></tr>`;
     console.error("watchlist:", err);
@@ -210,37 +186,30 @@ async function loadWatchlist() {
 function renderWatchlist() {
   const body = $("#watchlist-body");
   if (!state.coins.length) {
-    body.innerHTML = `<tr><td colspan="10" class="p-8 text-center text-muted">Tidak ada data koin.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-muted">Tidak ada data koin.</td></tr>`;
     return;
   }
 
+  // Tabel kompak kolom kiri: Coin | Price (live) | Signal | SL | TP | Aksi.
   body.innerHTML = state.coins
-    .map((c, i) => `
+    .map((c) => `
       <tr class="wl-row ${c.coin_id === state.selected ? "selected" : ""}" data-coin="${esc(c.coin_id)}">
-        <td class="text-muted num">${i + 1}</td>
         <td>
-          <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2.5">
             ${coinIcon(c.symbol)}
-            <div>
-              <div class="font-semibold">${esc(c.name)}</div>
-              <div class="text-[11px] uppercase text-muted">${esc(c.symbol)}</div>
+            <div class="min-w-0">
+              <div class="truncate font-semibold">${esc(c.name)}</div>
+              <div class="text-[10px] uppercase text-muted">${esc(c.symbol)}</div>
             </div>
           </div>
         </td>
-        <td class="num text-right font-semibold">$${fmtPrice(c.price)}</td>
-        <td>${TREND_BADGE[c.trend] || `<span class="badge badge-neutral">${esc(c.trend)}</span>`}</td>
-        <td>${REC_BADGE[c.recommendation] || `<span class="badge badge-neutral">${esc(c.recommendation)}</span>`}</td>
-        <td class="num text-right text-bear">$${fmtPrice(c.sl_price)}</td>
-        <td class="num text-right text-bull">$${fmtPrice(c.tp_price)}</td>
-        <td class="num text-center text-cyan">${esc(c.risk_reward_ratio || "—")}</td>
-        <td class="text-center"><span class="badge badge-cyan">${esc(c.suggested_allocation_pct || "—")}</span></td>
-        <td class="text-center">
-          <button class="btn-analyze" data-coin="${esc(c.coin_id)}">
-            <i class="fa-solid fa-magnifying-glass-chart mr-1"></i>Analyze
-          </button>${state.custom.includes(c.coin_id)
-            ? `<span class="wl-remove" data-remove="${esc(c.coin_id)}" title="Hapus dari watchlist"><i class="fa-solid fa-xmark"></i></span>`
-            : ""}
-        </td>
+        <td class="num text-right font-semibold cell-price">$${fmtPrice(c.price)}${c.error ? `<div class="text-[9.5px] text-bear">error</div>` : ""}</td>
+        <td class="cell-signal">${REC_BADGE[c.recommendation] || `<span class="badge badge-neutral">${esc(c.recommendation || "—")}</span>`}</td>
+        <td class="num text-right text-bear cell-sl">$${fmtPrice(c.sl_price)}</td>
+        <td class="num text-right text-bull cell-tp">$${fmtPrice(c.tp_price)}</td>
+        <td class="text-center">${state.custom.includes(c.coin_id)
+          ? `<span class="wl-remove" data-remove="${esc(c.coin_id)}" title="Hapus dari watchlist"><i class="fa-solid fa-xmark"></i></span>`
+          : ""}</td>
       </tr>`)
     .join("");
 
@@ -598,22 +567,27 @@ function renderPortfolio(data) {
 
   const body = $("#portfolio-body");
   if (!data.positions.length) {
-    body.innerHTML = `<tr><td colspan="9" class="p-8 text-center text-muted">Belum ada posisi — klik <b>“+ Catat Posisi Beli”</b> untuk mulai jurnal.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-muted">Belum ada posisi — klik <b>“+ Catat Posisi”</b> untuk mulai jurnal.</td></tr>`;
     return;
   }
 
+  // Tabel kompak: Coin (jumlah di sub-baris) | Harga masuk->sekarang | PnL
+  // | SL | Trailing | Aksi.
   body.innerHTML = data.positions.map((p) => {
     const pnlCls = p.floating_pnl_usd == null ? "text-muted" : p.floating_pnl_usd >= 0 ? "text-bull" : "text-bear";
     const pnlPct = p.floating_pnl_pct != null
-      ? `<div class="text-[11px] ${pnlCls}">${p.floating_pnl_pct >= 0 ? "+" : "−"}${Math.abs(p.floating_pnl_pct).toFixed(2)}%</div>`
+      ? `<div class="text-[10px] ${pnlCls}">${p.floating_pnl_pct >= 0 ? "+" : "−"}${Math.abs(p.floating_pnl_pct).toFixed(2)}%</div>`
       : "";
     const label = `${p.symbol || p.coin_id}`;
+    const amt = Number(p.amount).toLocaleString("id-ID", { maximumFractionDigits: 8 });
+    const now = p.current_price != null ? `$${fmtPrice(p.current_price)}` : "—";
     return `<tr class="wl-row" data-coin="${esc(p.coin_id)}">
-      <td><div class="flex items-center gap-2">${coinIcon(p.symbol)}<div><div class="font-semibold">${esc(p.name)}</div><div class="text-[10px] uppercase text-muted">${esc(p.symbol)}${p.notes ? " • " + esc(p.notes) : ""}</div></div></div></td>
-      <td class="num text-right">${Number(p.amount).toLocaleString("id-ID", { maximumFractionDigits: 8 })}</td>
-      <td class="num text-right">$${fmtPrice(p.buy_price)}</td>
-      <td class="num text-right">${p.current_price != null ? "$" + fmtPrice(p.current_price) : "—"}${p.error ? `<div class="text-[10px] text-bear">data error</div>` : ""}</td>
-      <td class="num text-right">${pfMoney(p.cost_usd, false)}</td>
+      <td><div class="flex items-center gap-2.5">${coinIcon(p.symbol)}<div class="min-w-0"><div class="truncate font-semibold">${esc(p.name)}</div><div class="text-[10px] uppercase text-muted">${amt} ${esc(p.symbol)}${p.notes ? " • " + esc(p.notes) : ""}</div></div></div></td>
+      <td class="num">
+        <div>$${fmtPrice(p.buy_price)}</div>
+        <div class="text-[11px] text-cyan">${now}</div>
+        ${p.error ? `<div class="text-[9.5px] text-bear">data error</div>` : ""}
+      </td>
       <td class="text-right"><div class="num font-bold ${pnlCls}">${pfMoney(p.floating_pnl_usd)}</div>${pnlPct}</td>
       <td class="text-center">${pfStatusBadge(p.sl_status)}</td>
       <td class="text-center">${pfStatusBadge(p.trailing_stop_status)}</td>
@@ -634,11 +608,114 @@ async function loadPortfolio() {
     renderPortfolio(await api("/api/portfolio/positions"));
   } catch (err) {
     console.warn("portfolio:", err.message);
-    $("#portfolio-body").innerHTML = `<tr><td colspan="9" class="p-6 text-center text-bear">Gagal memuat portofolio: ${esc(err.message)}</td></tr>`;
+    $("#portfolio-body").innerHTML = `<tr><td colspan="6" class="p-6 text-center text-bear">Gagal memuat portofolio: ${esc(err.message)}</td></tr>`;
   }
 }
 
 /* ---------------- Selection & detail loading ---------------- */
+
+/* --------- Header koin terpilih + live price polling (Phase 7) --------- */
+
+function setCoinHeader(c) {
+  if (!c) return;
+  $("#d-name").textContent = c.name || "—";
+  $("#d-symbol").textContent = c.symbol || "—";
+
+  const iconUrl = `https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/${String(c.symbol || "").toLowerCase()}.png`;
+  const icon = $("#d-icon");
+  if (icon.getAttribute("src") !== iconUrl) icon.src = iconUrl;
+  icon.style.visibility = "visible";
+
+  $("#d-price").textContent = `$${fmtPrice(c.price)}`;
+  $("#d-signal-line").innerHTML = `${TREND_BADGE[c.trend] || ""} ${REC_BADGE[c.recommendation] || ""}`;
+
+  // %24 jam (Binance)
+  const chEl = $("#d-change24h");
+  const hasCh = c.change_24h_pct != null && !Number.isNaN(Number(c.change_24h_pct));
+  if (hasCh) {
+    const ch = Number(c.change_24h_pct);
+    chEl.textContent = `${ch >= 0 ? "+" : "−"}${Math.abs(ch).toFixed(2)}%`;
+    chEl.className = `num text-sm font-bold ${ch >= 0 ? "text-bull" : "text-bear"}`;
+  } else {
+    chEl.textContent = "—";
+    chEl.className = "num text-sm font-bold text-muted";
+  }
+
+  // Sumber harga: live Binance vs fallback CoinGecko
+  const live = c.price_source === "binance";
+  const srcEl = $("#d-source");
+  srcEl.textContent = live ? "live • binance" : "coingecko • fallback";
+  srcEl.className = live ? "text-bull" : "text-amber";
+}
+
+function patchDetailLive(c) {
+  if (!c || c.error || !state.selected || c.coin_id !== state.selected) return;
+  setCoinHeader(c);
+
+  // Kartu Execution: level SL/TP/trailing ikut bergerak dengan harga live,
+  // kalkulator dihitung ulang dari harga terbaru.
+  if (state.exec) {
+    state.exec.current_price = c.price;
+    if (c.sl_price != null) state.exec.stop_loss_price = c.sl_price;
+    if (c.tp_price != null) state.exec.take_profit_price = c.tp_price;
+    if (c.trailing_stop_trigger != null) state.exec.trailing_stop_trigger = c.trailing_stop_trigger;
+    const slEl = $("#p-sl");
+    if (slEl) slEl.textContent = `$${fmtPrice(c.sl_price)}`;
+    const tpEl = $("#p-tp");
+    if (tpEl) tpEl.textContent = `$${fmtPrice(c.tp_price)}`;
+    const trEl = $("#p-trailing");
+    if (trEl && c.trailing_stop_trigger) trEl.textContent = c.trailing_stop_trigger;
+    updateCalculator();
+  }
+}
+
+function applyLiveItems(items) {
+  const byId = new Map(items.map((c) => [c.coin_id, c]));
+
+  // 1. Perbarui state (sumber kebenaran untuk render berikutnya).
+  for (const c of state.coins) {
+    const lp = byId.get(c.coin_id);
+    if (!lp || lp.error) continue;
+    for (const key of [
+      "price", "price_source", "sl_price", "tp_price",
+      "trailing_stop_trigger", "risk_reward_ratio",
+      "suggested_allocation_pct", "trend", "recommendation",
+      "change_24h_pct",
+    ]) {
+      if (lp[key] != null) c[key] = lp[key];
+    }
+  }
+
+  // 2. Patch sel tabel watchlist tanpa re-render penuh (tanpa kedip).
+  document.querySelectorAll("#watchlist-body tr[data-coin]").forEach((tr) => {
+    const c = state.coins.find((x) => x.coin_id === tr.dataset.coin);
+    if (!c) return;
+    const price = tr.querySelector(".cell-price");
+    if (price) price.innerHTML = `$${fmtPrice(c.price)}${c.error ? `<div class="text-[9.5px] text-bear">error</div>` : ""}`;
+    const sl = tr.querySelector(".cell-sl");
+    if (sl) sl.textContent = `$${fmtPrice(c.sl_price)}`;
+    const tp = tr.querySelector(".cell-tp");
+    if (tp) tp.textContent = `$${fmtPrice(c.tp_price)}`;
+    const sig = tr.querySelector(".cell-signal");
+    if (sig) sig.innerHTML = REC_BADGE[c.recommendation] || `<span class="badge badge-neutral">${esc(c.recommendation || "—")}</span>`;
+  });
+
+  // 3. Header koin terpilih + kartu execution (bila koin tsb dipilih).
+  const sel = state.coins.find((c) => c.coin_id === state.selected);
+  if (sel) patchDetailLive(sel);
+}
+
+async function pollLivePrices() {
+  try {
+    const data = await api(`/api/crypto/live-prices?coins=${encodeURIComponent(watchParams())}`);
+    const items = data.coins || [];
+    if (!items.length) return;
+    applyLiveItems(items);
+    $("#wl-updated").textContent = `live ${new Date().toLocaleTimeString("id-ID")}`;
+  } catch (err) {
+    console.warn("live-prices:", err.message);
+  }
+}
 
 async function selectCoin(coinId) {
   if (!coinId) return;
@@ -653,12 +730,7 @@ async function selectCoin(coinId) {
   // Instant feedback dari data watchlist yang sudah di tangan.
   const row = state.coins.find((c) => c.coin_id === coinId);
   if (row) {
-    $("#d-name").textContent = row.name;
-    $("#d-symbol").textContent = row.symbol;
-    $("#d-icon").src = `https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/128/color/${row.symbol.toLowerCase()}.png`;
-    $("#d-icon").style.visibility = "visible";
-    $("#d-price").textContent = `$${fmtPrice(row.price)}`;
-    $("#d-signal-line").innerHTML = `${TREND_BADGE[row.trend] || ""} ${REC_BADGE[row.recommendation] || ""}`;
+    setCoinHeader(row);
     renderExecution(null, row);
   }
 
@@ -704,8 +776,12 @@ async function loadDetail(coinId, { withAnalysis = false } = {}) {
 /* ---------------- Polling & boot ---------------- */
 
 function startPolling() {
+  // Harga live Binance + SL/TP: tiap 5 detik (endpoint ringan, cache BE 5 dtk).
+  state.timers.live = setInterval(pollLivePrices, POLL_LIVE_MS);
+
   state.timers.watchlist = setInterval(() => {
     loadWatchlist();
+    loadPortfolio();
     if (state.selected) loadDetail(state.selected, { withAnalysis: false });
   }, POLL_WATCHLIST_MS);
 
@@ -736,6 +812,7 @@ async function refreshChart() {
 function pausePolling() {
   clearInterval(state.timers.watchlist);
   clearInterval(state.timers.analysis);
+  clearInterval(state.timers.live);
   state.timers = {};
 }
 
@@ -788,6 +865,17 @@ function boot() {
   // Timeframe chart (tanpa reload halaman).
   document.querySelectorAll(".tf-btn").forEach((b) =>
     b.addEventListener("click", () => setTimeframe(b.dataset.tf))
+  );
+
+  // Tab switcher kolom kiri: Watchlist <-> Portofolio.
+  document.querySelectorAll(".panel-tab").forEach((b) =>
+    b.addEventListener("click", () => {
+      document.querySelectorAll(".panel-tab").forEach((x) =>
+        x.classList.toggle("active", x === b)
+      );
+      $("#watchlist-panel").classList.toggle("hidden", b.dataset.panel !== "watchlist-panel");
+      $("#portfolio-panel").classList.toggle("hidden", b.dataset.panel !== "portfolio-panel");
+    })
   );
 
   // Kalkulator posisi — hitung ulang real-time.

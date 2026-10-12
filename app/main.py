@@ -12,6 +12,8 @@ from app.services.crypto_service import (
     get_coin_detail,
     get_coin_history,
     get_coin_list,
+    get_binance_live_prices,
+    get_binance_24h_changes,
     resolve_coin_id
 )
 
@@ -87,6 +89,28 @@ async def crypto_markets():
 DEFAULT_WATCHLIST = ["bitcoin", "ethereum", "solana", "binancecoin", "ripple"]
 
 
+
+def _requested_coins(coins: str = None) -> list:
+    """Parse query `coins` (dipisah koma) -> daftar; default watchlist."""
+    if coins and coins.strip():
+        return [c.strip().lower() for c in coins.split(",") if c.strip()]
+    return list(DEFAULT_WATCHLIST)
+
+
+async def _resolve_coin_ids(requested: list) -> list:
+    """Resolusi nama/simbol -> coin_id CoinGecko (dedupe, urutan utuh).
+
+    Mis. "doge"/"Dogecoin" -> "dogecoin". get_coin_list di-cache 10 menit
+    sehingga murah bahkan untuk polling cepat tiap 5 detik.
+    """
+    coin_ids = []
+    for coin in requested:
+        resolved = (await resolve_coin_id(coin)) or coin
+        if resolved not in coin_ids:
+            coin_ids.append(resolved)
+    return coin_ids
+
+
 async def _watchlist_meta() -> dict:
     """Map coin_id -> data /coins/list (di-cache 10 menit di crypto_service)."""
     try:
@@ -97,14 +121,30 @@ async def _watchlist_meta() -> dict:
         return {}
 
 
-async def _watchlist_item(coin_id: str, meta: dict) -> dict:
-    """Ringkas satu koin: harga, trend, rekomendasi, SL/TP."""
+async def _watchlist_item(
+    coin_id: str,
+    meta: dict,
+    live_price: float = None,
+    change_24h_pct: float = None,
+) -> dict:
+    """Ringkas satu koin: harga, trend, rekomendasi, SL/TP.
+
+    `live_price` (Binance public API, cache 5 detik) dipakai sebagai
+    `current_price` sehingga harga di tabel & level SL/TP/trailing ikut
+    bergerak real-time. Bila None (Binance gagal / koin tanpa pasangan),
+    otomatis memakai harga harian CoinGecko (fallback tanpa error).
+    """
     info = meta.get(coin_id, {})
     item = {
         "coin_id": coin_id,
         "name": info.get("name", coin_id),
         "symbol": (info.get("symbol") or coin_id).upper(),
+        "change_24h_pct": change_24h_pct,
     }
+
+    # Harga live Binance (bila tersedia) — fallback CoinGecko di bawah.
+    price = float(live_price) if live_price else None
+    price_source = "binance" if price is not None else "coingecko"
 
     try:
         history = await get_coin_history(coin_id, days=365)
@@ -116,19 +156,26 @@ async def _watchlist_item(coin_id: str, meta: dict) -> dict:
 
         technical_score = calculate_technical_score(latest_data)
 
+        # Harga live Binance menggantikan harga harian CoinGecko untuk
+        # seluruh perhitungan eksekusi; ATR tetap dari data harian.
+        if price is None:
+            price = float(latest_data["price"])
+
         recommendation = generate_recommendation(
             technical_score["technical_score"],
             technical_score["condition"],
             trend_filter_ok=technical_score["trend_filter_ok"],
             coin_id=coin_id,
-            current_price=latest_data["price"],
+            current_price=price,
             atr_14=latest_data.get("atr_14"),
+            price_source=price_source,
         )
 
         execution = recommendation["execution"]
 
         item.update({
             "price": execution["current_price"],
+            "price_source": price_source,
             "trend": technical_score["condition"],  # BULLISH/NEUTRAL/BEARISH
             "recommendation": recommendation["recommendation"],  # BUY/HOLD/SELL
             "sl_price": execution["stop_loss_price"],
@@ -138,8 +185,12 @@ async def _watchlist_item(coin_id: str, meta: dict) -> dict:
             "suggested_allocation_pct": execution["suggested_allocation_pct"],
         })
     except Exception as exc:
-        # Koin gagal (mis. 429/404) tidak menjatuhkan koin lain.
+        # Koin gagal (mis. 429/404) tidak menjatuhkan koin lain. Harga live
+        # Binance tetap bisa tampil walau CoinGecko sedang error.
         item["error"] = f"{type(exc).__name__}: {exc}"
+        if price is not None:
+            item["price"] = price
+            item["price_source"] = "binance"
 
     return item
 
@@ -162,13 +213,15 @@ async def crypto_dashboard_watchlist(coins: str = None):
 
     # Resolusi nama/simbol -> coin_id CoinGecko (mis. "doge"/"Dogecoin"
     # -> "dogecoin"). get_coin_list di-cache 10 menit sehingga murah.
-    coin_ids = []
-    for coin in requested:
-        resolved = (await resolve_coin_id(coin)) or coin
-        if resolved not in coin_ids:
-            coin_ids.append(resolved)
+    coin_ids = await _resolve_coin_ids(requested)
 
     meta = await _watchlist_meta()
+
+    # Harga live Binance (public API, cache 5 detik) + %24 jam — sekali
+    # fetch untuk seluruh koin, diteruskan ke tiap item sehingga harga &
+    # level SL/TP bergerak real-time. Gagal -> fallback CoinGecko per koin.
+    live = await get_binance_live_prices(coin_ids)
+    changes = await get_binance_24h_changes(coin_ids)
 
     # Fetch berurutan (bukan burst paralel): CoinGecko memberlakukan
     # limit jendela pendek — burst paralel memicu 401/429 pada koin
@@ -176,10 +229,52 @@ async def crypto_dashboard_watchlist(coins: str = None):
     # (history 5 menit), endpoint tetap instan.
     items = []
     for coin_id in coin_ids:
-        items.append(await _watchlist_item(coin_id, meta))
+        items.append(
+            await _watchlist_item(
+                coin_id,
+                meta,
+                live_price=live.get(coin_id),
+                change_24h_pct=changes.get(coin_id),
+            )
+        )
 
     return {
         "count": len(items),
+        "binance_live": bool(live),
+        "coins": list(items),
+    }
+
+
+@app.get("/api/crypto/live-prices")
+async def crypto_live_prices(coins: str = None):
+    """Harga live Binance + level SL/TP terbaru — polling cepat UI (5 detik).
+
+    Ringan di backend: history CoinGecko di-cache 5 menit dan harga
+    Binance 5 detik, sehingga aman dipanggil berkali-kali tiap detik
+    oleh dashboard agar harga & Stop-Loss bergerak real-time detik per
+    detik. Selalu 200 — bila Binance gagal, item memakai harga CoinGecko
+    (price_source="coingecko").
+    """
+    coin_ids = await _resolve_coin_ids(_requested_coins(coins))
+    meta = await _watchlist_meta()
+
+    live = await get_binance_live_prices(coin_ids)
+    changes = await get_binance_24h_changes(coin_ids)
+
+    items = []
+    for coin_id in coin_ids:
+        items.append(
+            await _watchlist_item(
+                coin_id,
+                meta,
+                live_price=live.get(coin_id),
+                change_24h_pct=changes.get(coin_id),
+            )
+        )
+
+    return {
+        "count": len(items),
+        "binance_live": bool(live),
         "coins": list(items),
     }
 
@@ -234,17 +329,29 @@ async def crypto_recommendation(coin_id: str, days: int = 365):
 
     technical_score = calculate_technical_score(latest_data)
 
+    # Harga live Binance (fallback CoinGecko) sebagai current_price —
+    # level SL/TP/trailing dihitung ulang dari harga bursa yang bergerak.
+    live = await get_binance_live_prices([coin_id])
+    live_price = live.get(coin_id)
+    changes = await get_binance_24h_changes([coin_id])
+
+    price = float(live_price) if live_price else float(latest_data["price"])
+    price_source = "binance" if live_price else "coingecko"
+
     recommendation = generate_recommendation(
         technical_score["technical_score"],
         technical_score["condition"],
         trend_filter_ok=technical_score["trend_filter_ok"],
         coin_id=coin_id,
-        current_price=latest_data["price"],
+        current_price=price,
         atr_14=latest_data.get("atr_14"),
+        price_source=price_source,
     )
 
     return {
         "coin_id": coin_id,
+        "price_source": price_source,
+        "change_24h_pct": changes.get(coin_id),
         "technical": technical_score,
         "recommendation": recommendation,
         # Parameter eksekusi riil (angka praktis untuk trading pribadi):
@@ -320,11 +427,17 @@ async def crypto_analysis(coin_id: str, days: int = 365):
     )
 
     # Tugas 1: parameter eksekusi riil juga muncul di endpoint analysis.
+    # Phase 7: harga live Binance (fallback CoinGecko) agar SL/TP real-time.
+    live = await get_binance_live_prices([resolved_coin_id])
+    live_price = live.get(resolved_coin_id)
+    price = float(live_price) if live_price else float(latest_data["price"])
+
     execution = build_execution_plan(
         coin_id=resolved_coin_id,
-        current_price=latest_data["price"],
+        current_price=price,
         atr_14=latest_data.get("atr_14"),
         recommendation=final["recommendation"],
+        price_source="binance" if live_price else "coingecko",
     )
 
     return {

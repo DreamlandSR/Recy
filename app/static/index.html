@@ -40,18 +40,18 @@
 </head>
 
 <body>
-  <!-- ==================== 1. TOP BAR ==================== -->
-  <header class="sticky top-0 z-50 border-b border-edge/70 bg-obsidian/80 backdrop-blur-md">
-    <div class="mx-auto flex max-w-[1500px] items-center justify-between px-5 py-3">
+  <!-- ==================== TOP BAR ==================== -->
+  <header class="topbar border-b border-edge/70 bg-obsidian/80 backdrop-blur-md">
+    <div class="mx-auto flex max-w-[1680px] items-center justify-between px-4 py-2.5">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-bull/10 text-bull text-lg border border-bull/30">
+        <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-bull/10 text-bull text-base border border-bull/30">
           <i class="fa-solid fa-chart-line"></i>
         </div>
         <div>
-          <h1 class="font-display text-lg font-extrabold tracking-wide leading-tight">
+          <h1 class="font-display text-base font-extrabold tracking-wide leading-tight">
             RECY <span class="text-cyan">Crypto Intelligence Terminal</span>
           </h1>
-          <div class="flex items-center gap-2 text-[11px] text-muted">
+          <div class="flex items-center gap-2 text-[10.5px] text-muted">
             <span class="live-dot"></span>
             <span>Live System Online</span>
             <span class="hidden sm:inline">• Personal Trading Edition</span>
@@ -59,12 +59,12 @@
         </div>
       </div>
 
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2.5">
         <!-- Fear & Greed chip -->
-        <div id="fng-chip" class="glass flex items-center gap-3 px-4 py-2 text-sm" title="Fear & Greed Index (alternative.me)">
+        <div id="fng-chip" class="glass flex items-center gap-2.5 px-3.5 py-1.5 text-sm" title="Fear & Greed Index (alternative.me)">
           <i class="fa-solid fa-gauge-high text-amber"></i>
           <div class="leading-tight">
-            <div class="text-[10px] uppercase tracking-wider text-muted">Fear &amp; Greed</div>
+            <div class="text-[9.5px] uppercase tracking-wider text-muted">Fear &amp; Greed</div>
             <div id="fng-value" class="num font-bold text-amber">…</div>
           </div>
         </div>
@@ -78,338 +78,347 @@
     </div>
   </header>
 
-  <main class="mx-auto max-w-[1500px] px-5 pb-14 pt-6">
-    <!-- ==================== TICKER ==================== -->
-    <section id="ticker" class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <!-- diisi JS: BTC / ETH / SOL mini cards -->
-    </section>
+  <main class="terminal-main mx-auto w-full max-w-[1680px] px-3 pb-2 pt-3">
+    <div class="terminal-grid">
 
-    <!-- ==================== 2. WATCHLIST (MASTER TABLE) ==================== -->
-    <section class="glass mb-6 overflow-hidden">
-      <div class="flex items-center justify-between px-5 py-4">
-        <div>
-          <h2 class="font-display text-base font-bold tracking-wide">
-            <i class="fa-solid fa-list-check mr-2 text-cyan"></i>Watchlist Pantauan Utama
-          </h2>
-          <p class="text-xs text-muted">Sinyal teknikal + level eksekusi riil • auto-refresh tiap 45 detik</p>
-        </div>
-        <div class="flex flex-wrap items-center gap-3">
+      <!-- ==================== KOLOM KIRI (~35%) ==================== -->
+      <aside class="col col-left">
+        <!-- Search / add coin -->
+        <div class="glass p-3">
           <div class="flex items-center gap-2">
-            <input id="input-add-coin" type="text" placeholder="Tambah koin (misal: dogecoin, cardano, sui)..." class="search-input" />
+            <input id="input-add-coin" type="text" placeholder="Tambah koin (dogecoin, cardano, sui)…" class="search-input search-full" />
             <button id="btn-add-coin" class="btn-analyze whitespace-nowrap"><i class="fa-solid fa-plus"></i> Tambah</button>
           </div>
-          <span id="wl-updated" class="text-[11px] text-muted"></span>
-        </div>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="wl-table">
-          <thead>
-            <tr class="bg-obsidian/40">
-              <th>#</th>
-              <th>Coin</th>
-              <th class="text-right">Price</th>
-              <th>Trend</th>
-              <th>Signal</th>
-              <th class="text-right">Stop-Loss</th>
-              <th class="text-right">Take-Profit</th>
-              <th class="text-center">R / R</th>
-              <th class="text-center">Allocation</th>
-              <th class="text-center">Action</th>
-            </tr>
-          </thead>
-          <tbody id="watchlist-body">
-            <tr><td colspan="10" class="p-8 text-center text-muted">Memuat watchlist…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- ==================== DETAIL PANEL ==================== -->
-    <section id="detail-empty" class="glass mb-6 p-10 text-center text-muted">
-      <i class="fa-regular fa-hand-pointer mb-3 block text-3xl opacity-60"></i>
-      Pilih koin di watchlist (mis. <b class="text-cyan">Solana</b>) untuk melihat grafik, indikator teknikal, dan action plan.
-    </section>
-
-    <section id="detail" class="hidden">
-      <!-- 3. CHART + TECHNICAL -->
-      <div class="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <!-- Chart -->
-        <div class="glass glass-hover p-5 xl:col-span-2">
-          <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center gap-3">
-              <img id="d-icon" class="coin-icon h-9 w-9" src="" alt="" />
-              <div>
-                <div class="flex items-baseline gap-2">
-                  <h3 id="d-name" class="font-display text-lg font-bold">—</h3>
-                  <span id="d-symbol" class="text-xs uppercase text-muted">—</span>
-                </div>
-                <div class="text-[11px] text-muted">Harian 90 hari • Area + Volume (CoinGecko)</div>
-              </div>
-            </div>
-            <div class="text-right">
-              <div id="d-price" class="num text-2xl font-bold">—</div>
-              <div id="d-signal-line" class="text-xs text-muted">—</div>
-            </div>
-          </div>
-          <div class="mb-3 flex items-center gap-1.5">
-            <span class="mr-1 text-[10px] uppercase tracking-wider text-muted">Timeframe</span>
-            <button class="tf-btn" data-tf="7D">7D</button>
-            <button class="tf-btn" data-tf="30D">30D</button>
-            <button class="tf-btn active" data-tf="90D">90D</button>
-            <button class="tf-btn" data-tf="1Y">1Y</button>
-          </div>
-          <div id="chart" class="h-[340px] w-full"></div>
-        </div>
-
-        <!-- Technical gauges -->
-        <div class="glass glass-hover p-5">
-          <h3 class="mb-4 font-display text-sm font-bold uppercase tracking-wider text-muted">
-            <i class="fa-solid fa-microscope mr-2 text-cyan"></i>Technical Breakdown
-          </h3>
-          <div class="mb-4 flex items-center gap-5">
-            <div id="g-overall" class="gauge">
-              <span id="g-overall-value" class="num text-2xl font-extrabold">—</span>
-              <span class="text-[10px] uppercase tracking-wider text-muted">Score</span>
-            </div>
-            <div class="flex-1 space-y-2.5">
-              <div>
-                <div class="mb-1 flex justify-between text-[11px]"><span class="text-muted">Trend</span><span id="v-trend" class="num">—</span></div>
-                <div class="bar-track"><div id="b-trend" class="bar-fill" style="background: var(--cyan)"></div></div>
-              </div>
-              <div>
-                <div class="mb-1 flex justify-between text-[11px]"><span class="text-muted">Momentum</span><span id="v-momentum" class="num">—</span></div>
-                <div class="bar-track"><div id="b-momentum" class="bar-fill" style="background: var(--bull)"></div></div>
-              </div>
-              <div>
-                <div class="mb-1 flex justify-between text-[11px]"><span class="text-muted">Volatility</span><span id="v-volatility" class="num">—</span></div>
-                <div class="bar-track"><div id="b-volatility" class="bar-fill" style="background: var(--amber)"></div></div>
-              </div>
-              <div>
-                <div class="mb-1 flex justify-between text-[11px]"><span class="text-muted">Volume</span><span id="v-volume" class="num">—</span></div>
-                <div class="bar-track"><div id="b-volume" class="bar-fill" style="background: var(--bear)"></div></div>
-              </div>
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-3 text-center">
-            <div class="level-box">
-              <div class="text-[10px] uppercase tracking-wider text-muted">Rezim (ADX)</div>
-              <div id="d-regime" class="mt-1 text-sm font-bold">—</div>
-            </div>
-            <div class="level-box">
-              <div class="text-[10px] uppercase tracking-wider text-muted">RSI 14</div>
-              <div id="d-rsi" class="num mt-1 text-sm font-bold">—</div>
-            </div>
-            <div class="level-box">
-              <div class="text-[10px] uppercase tracking-wider text-muted">MACD Hist</div>
-              <div id="d-macd" class="num mt-1 text-sm font-bold">—</div>
-            </div>
-            <div class="level-box">
-              <div class="text-[10px] uppercase tracking-wider text-muted">Volume Ratio</div>
-              <div id="d-volratio" class="num mt-1 text-sm font-bold">—</div>
-            </div>
-          </div>
-          <div class="mt-3 flex items-center justify-between text-[11px] text-muted">
-            <span>Sentimen: <b id="d-sentiment" class="text-amber">—</b></span>
-            <span>Final score: <b id="d-final" class="num text-cyan">—</b></span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 4. EXECUTION CARD + NEWS -->
-      <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <!-- Execution plan -->
-        <div class="glass glass-hover p-5">
-          <h3 class="mb-4 font-display text-sm font-bold uppercase tracking-wider text-muted">
-            <i class="fa-solid fa-bullseye mr-2 text-bull"></i>Execution Plan
-          </h3>
-          <div id="plan-banner" class="plan-banner plan-hold mb-4">
-            <i class="fa-solid fa-hourglass-half"></i><span>Memuat rencana…</span>
-          </div>
-          <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div class="level-box level-sl">
-              <div class="text-[10px] uppercase tracking-wider text-muted">Stop-Loss</div>
-              <div id="p-sl" class="num mt-1 text-lg font-bold text-bear">—</div>
-              <div id="p-sl-dist" class="text-[11px] text-muted">—</div>
-            </div>
-            <div class="level-box level-tp">
-              <div class="text-[10px] uppercase tracking-wider text-muted">Take-Profit</div>
-              <div id="p-tp" class="num mt-1 text-lg font-bold text-bull">—</div>
-              <div id="p-tp-dist" class="text-[11px] text-muted">—</div>
-            </div>
-          </div>
-          <div class="mb-4 grid grid-cols-2 gap-3">
-            <div class="level-box">
-              <div class="text-[10px] uppercase tracking-wider text-muted">Risk / Reward</div>
-              <div id="p-rr" class="num mt-1 text-sm font-bold text-cyan">—</div>
-            </div>
-            <div class="level-box">
-              <div class="text-[10px] uppercase tracking-wider text-muted">Alokasi</div>
-              <div id="p-alloc" class="num mt-1 text-sm font-bold text-amber">—</div>
-            </div>
-          </div>
-
-          <!-- Kalkulator Posisi & Risiko (real-time) -->
-          <div class="mb-4 rounded-xl border border-edge/70 bg-obsidian/40 p-4">
-            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <div class="text-[10px] uppercase tracking-wider text-muted">
-                <i class="fa-solid fa-calculator mr-1 text-cyan"></i>Kalkulator Posisi &amp; Risiko
-              </div>
-              <div class="flex items-center gap-2">
-                <input id="calc-asset" type="number" min="0" step="any" value="1000" class="calc-input num" title="Modal portofolio" />
-                <select id="calc-currency" class="calc-input" title="Mata uang">
-                  <option value="USD">USD ($)</option>
-                  <option value="IDR">IDR (Rp)</option>
-                </select>
-                <input id="calc-rate" type="number" min="0" step="any" value="16300" class="calc-input num hidden" title="Kurs USD -> IDR" placeholder="Kurs" />
-              </div>
-            </div>
-            <div class="grid grid-cols-2 gap-3 text-center">
-              <div class="level-box">
-                <div class="text-[10px] uppercase tracking-wider text-muted">Porsi Masuk</div>
-                <div id="calc-alloc" class="num mt-1 text-sm font-bold text-cyan">—</div>
-              </div>
-              <div class="level-box">
-                <div class="text-[10px] uppercase tracking-wider text-muted">Est. Jumlah Koin</div>
-                <div id="calc-qty" class="num mt-1 text-sm font-bold">—</div>
-              </div>
-              <div class="level-box level-sl">
-                <div class="text-[10px] uppercase tracking-wider text-muted">Risiko jika Kena SL</div>
-                <div id="calc-risk" class="num mt-1 text-sm font-bold text-bear">—</div>
-              </div>
-              <div class="level-box level-tp">
-                <div class="text-[10px] uppercase tracking-wider text-muted">Potensi jika Kena TP</div>
-                <div id="calc-reward" class="num mt-1 text-sm font-bold text-bull">—</div>
-              </div>
-            </div>
-            <div class="mt-2 text-[10.5px] text-muted">
-              Porsi memakai batas bawah alokasi (<span id="calc-pct" class="num">—</span>); qty = porsi / harga saat ini.
-            </div>
-          </div>
-          <div class="mb-3">
-            <div class="mb-1 text-[10px] uppercase tracking-wider text-muted">
-              <i class="fa-solid fa-arrow-trend-up mr-1"></i>Trailing Stop Trigger
-            </div>
-            <div id="p-trailing" class="rounded-lg border border-edge/70 bg-obsidian/50 p-3 text-[12.5px] leading-relaxed text-muted">—</div>
-          </div>
-          <div>
-            <div class="mb-1 text-[10px] uppercase tracking-wider text-muted">
-              <i class="fa-solid fa-shield-halved mr-1"></i>Risk Note
-            </div>
-            <div id="p-note" class="rounded-lg border border-edge/70 bg-obsidian/50 p-3 text-[12.5px] leading-relaxed">—</div>
+          <div class="mt-2 flex items-center justify-between gap-2 text-[10.5px] text-muted">
+            <span id="wl-updated">—</span>
+            <span>auto-refresh • klik baris untuk detail</span>
           </div>
         </div>
 
-        <!-- News sentiment -->
-        <div class="glass glass-hover p-5">
-          <div class="mb-4 flex items-center justify-between">
-            <h3 class="font-display text-sm font-bold uppercase tracking-wider text-muted">
-              <i class="fa-regular fa-newspaper mr-2 text-amber"></i>News Sentiment (FinBERT)
-            </h3>
-            <span id="news-count" class="text-[11px] text-muted">—</span>
-          </div>
-          <div id="news-list" class="max-h-[430px] overflow-y-auto pr-1">
-            <div class="p-6 text-center text-muted">Memuat berita…</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ==================== 5. PORTOFOLIO POSISI AKTIF ==================== -->
-    <section id="portfolio" class="glass mt-6 mb-6 overflow-hidden">
-      <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-        <div>
-          <h2 class="font-display text-base font-bold tracking-wide">
-            <i class="fa-solid fa-wallet mr-2 text-bull"></i>💼 Portofolio Posisi Aktif Saya
-          </h2>
-          <p class="text-xs text-muted">Jurnal pribadi • PnL mengambang live, status SL &amp; trailing stop</p>
-        </div>
-        <button id="btn-add-position" class="btn-analyze whitespace-nowrap">
-          <i class="fa-solid fa-plus"></i> Catat Posisi Beli
-        </button>
-      </div>
-
-      <!-- Ringkasan total -->
-      <div class="grid grid-cols-2 gap-3 px-5 pb-4 sm:grid-cols-4">
-        <div class="level-box">
-          <div class="text-[10px] uppercase tracking-wider text-muted">Total Modal</div>
-          <div id="pf-total-cost" class="num mt-1 text-sm font-bold">—</div>
-        </div>
-        <div class="level-box">
-          <div class="text-[10px] uppercase tracking-wider text-muted">Nilai Saat Ini</div>
-          <div id="pf-total-value" class="num mt-1 text-sm font-bold text-cyan">—</div>
-        </div>
-        <div class="level-box">
-          <div class="text-[10px] uppercase tracking-wider text-muted">Floating PnL</div>
-          <div id="pf-total-pnl" class="num mt-1 text-sm font-bold">—</div>
-        </div>
-        <div class="level-box">
-          <div class="text-[10px] uppercase tracking-wider text-muted">Posisi Aktif</div>
-          <div id="pf-count" class="num mt-1 text-sm font-bold text-amber">—</div>
-        </div>
-      </div>
-
-      <div class="overflow-x-auto">
-        <table class="wl-table">
-          <thead>
-            <tr class="bg-obsidian/40">
-              <th>Coin</th>
-              <th class="text-right">Jumlah</th>
-              <th class="text-right">Harga Masuk</th>
-              <th class="text-right">Harga Sekarang</th>
-              <th class="text-right">Modal</th>
-              <th class="text-right">PnL</th>
-              <th class="text-center">SL</th>
-              <th class="text-center">Trailing</th>
-              <th class="text-center">Aksi</th>
-            </tr>
-          </thead>
-          <tbody id="portfolio-body">
-            <tr><td colspan="9" class="p-8 text-center text-muted">Memuat portofolio…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- Modal: Catat Posisi Beli -->
-    <div id="pf-modal" class="modal-overlay hidden">
-      <div class="modal-card">
-        <div class="mb-4 flex items-center justify-between">
-          <h3 class="font-display text-sm font-bold uppercase tracking-wider text-muted">
-            <i class="fa-solid fa-cart-shopping mr-2 text-bull"></i>Catat Posisi Beli
-          </h3>
-          <button id="pf-modal-close" class="wl-remove text-base" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-        <div class="space-y-3">
-          <label class="block">
-            <span class="mb-1 block text-[10px] uppercase tracking-wider text-muted">Koin (id/nama/simbol)</span>
-            <input id="pf-coin" type="text" placeholder="misal: solana, doge, bitcoin" class="search-input w-full" />
-          </label>
-          <div class="grid grid-cols-2 gap-3">
-            <label class="block">
-              <span class="mb-1 block text-[10px] uppercase tracking-wider text-muted">Harga Beli Riil (USD)</span>
-              <input id="pf-buy-price" type="number" min="0" step="any" placeholder="misal: 150.25" class="calc-input num w-full" />
-            </label>
-            <label class="block">
-              <span class="mb-1 block text-[10px] uppercase tracking-wider text-muted">Jumlah Beli (koin)</span>
-              <input id="pf-amount" type="number" min="0" step="any" placeholder="misal: 2" class="calc-input num w-full" />
-            </label>
-          </div>
-          <label class="block">
-            <span class="mb-1 block text-[10px] uppercase tracking-wider text-muted">Catatan (opsional)</span>
-            <input id="pf-notes" type="text" placeholder="misal: DCA mingguan" class="search-input w-full" />
-          </label>
-          <button id="pf-save" class="btn-analyze w-full">
-            <i class="fa-solid fa-floppy-disk"></i> Simpan Posisi
+        <!-- Tab switcher: Watchlist / Portofolio -->
+        <div class="panel-tabs">
+          <button class="panel-tab active" data-panel="watchlist-panel">
+            <i class="fa-solid fa-list-check"></i> Watchlist
+          </button>
+          <button class="panel-tab" data-panel="portfolio-panel">
+            <i class="fa-solid fa-wallet"></i> Portofolio Aktif Saya
           </button>
         </div>
-      </div>
+
+        <!-- Watchlist table compact -->
+        <section id="watchlist-panel" class="glass left-panel">
+          <div class="wl-scroll">
+            <table class="wl-table wl-compact">
+              <thead>
+                <tr class="bg-obsidian/40">
+                  <th>Coin</th>
+                  <th class="text-right">Price</th>
+                  <th>Signal</th>
+                  <th class="text-right">SL</th>
+                  <th class="text-right">TP</th>
+                  <th class="text-center" title="Aksi"></th>
+                </tr>
+              </thead>
+              <tbody id="watchlist-body">
+                <tr><td colspan="6" class="p-6 text-center text-muted">Memuat watchlist…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Portofolio posisi aktif -->
+        <section id="portfolio-panel" class="glass left-panel hidden">
+          <div class="wl-scroll">
+            <div class="flex items-center justify-between gap-2 px-4 py-3">
+              <div class="text-[11px] text-muted">Jurnal pribadi • PnL mengambang live, status SL &amp; trailing</div>
+              <button id="btn-add-position" class="btn-analyze whitespace-nowrap">
+                <i class="fa-solid fa-plus"></i> Catat Posisi
+              </button>
+            </div>
+            <div class="grid grid-cols-2 gap-2 px-4 pb-3">
+              <div class="level-box">
+                <div class="lbl">Total Modal</div>
+                <div id="pf-total-cost" class="val num">—</div>
+              </div>
+              <div class="level-box">
+                <div class="lbl">Nilai Saat Ini</div>
+                <div id="pf-total-value" class="val num text-cyan">—</div>
+              </div>
+              <div class="level-box">
+                <div class="lbl">Floating PnL</div>
+                <div id="pf-total-pnl" class="val num">—</div>
+              </div>
+              <div class="level-box">
+                <div class="lbl">Posisi Aktif</div>
+                <div id="pf-count" class="val num text-amber">—</div>
+              </div>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="wl-table wl-compact">
+                <thead>
+                  <tr class="bg-obsidian/40">
+                    <th>Coin</th>
+                    <th>Harga</th>
+                    <th class="text-right">PnL</th>
+                    <th class="text-center">SL</th>
+                    <th class="text-center">Trail</th>
+                    <th class="text-center" title="Aksi"></th>
+                  </tr>
+                </thead>
+                <tbody id="portfolio-body">
+                  <tr><td colspan="6" class="p-6 text-center text-muted">Memuat portofolio…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <!-- ==================== KOLOM KANAN (~65%) ==================== -->
+      <section class="col col-right">
+        <!-- Header koin terpilih -->
+        <div class="glass coin-header">
+          <img id="d-icon" class="coin-icon coin-icon-lg" src="" alt="" />
+          <div class="min-w-0">
+            <div class="flex items-baseline gap-2">
+              <h3 id="d-name" class="font-display truncate text-lg font-bold">—</h3>
+              <span id="d-symbol" class="text-xs uppercase text-muted">—</span>
+            </div>
+            <div id="d-signal-line" class="mt-1 flex items-center gap-1.5 text-xs text-muted">—</div>
+          </div>
+          <div class="ml-auto text-right">
+            <div class="flex items-baseline justify-end gap-2">
+              <span id="d-price" class="num text-2xl font-extrabold">—</span>
+              <span id="d-change24h" class="num text-sm font-bold">—</span>
+            </div>
+            <div class="mt-0.5 flex items-center justify-end gap-1.5 text-[9.5px] uppercase tracking-wider">
+              <span class="live-dot"></span><span id="d-source" class="text-muted">—</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Placeholder bila belum ada koin dipilih -->
+        <div id="detail-empty" class="glass detail-empty text-center text-muted">
+          <div>
+            <i class="fa-regular fa-hand-pointer mb-3 block text-3xl opacity-60"></i>
+            Pilih koin di watchlist (mis. <b class="text-cyan">Solana</b>) untuk melihat grafik,
+            indikator teknikal, dan action plan.
+          </div>
+        </div>
+
+        <!-- Detail: chart + 2 kartu berdampingan -->
+        <div id="detail" class="hidden right-body">
+          <!-- Chart TradingView + timeframe -->
+          <div class="glass chart-card">
+            <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+              <div class="flex items-center gap-1.5">
+                <span class="mr-1 text-[10px] uppercase tracking-wider text-muted">Timeframe</span>
+                <button class="tf-btn" data-tf="7D">7D</button>
+                <button class="tf-btn" data-tf="30D">30D</button>
+                <button class="tf-btn active" data-tf="90D">90D</button>
+                <button class="tf-btn" data-tf="1Y">1Y</button>
+              </div>
+              <span class="text-[10.5px] text-muted">Area + Volume • CoinGecko daily • SL/TP dari harga live Binance</span>
+            </div>
+            <div id="chart" class="chart-canvas"></div>
+          </div>
+
+          <!-- Dua kartu berdampingan -->
+          <div class="cards-row">
+            <!-- 1. Execution Plan & Live Position Calculator -->
+            <div class="glass exec-card">
+              <div class="card-head">
+                <h3 class="card-title">
+                  <i class="fa-solid fa-bullseye mr-2 text-bull"></i>Execution Plan &amp; Position Calculator
+                </h3>
+              </div>
+              <div class="scroll-area">
+                <div id="plan-banner" class="plan-banner plan-hold mb-3">
+                  <i class="fa-solid fa-hourglass-half"></i><span>Memuat rencana…</span>
+                </div>
+
+                <div class="mb-3 grid grid-cols-4 gap-2">
+                  <div class="level-box level-sl">
+                    <div class="lbl">Stop-Loss</div>
+                    <div id="p-sl" class="val num text-bear">—</div>
+                    <div id="p-sl-dist" class="sub">—</div>
+                  </div>
+                  <div class="level-box level-tp">
+                    <div class="lbl">Take-Profit</div>
+                    <div id="p-tp" class="val num text-bull">—</div>
+                    <div id="p-tp-dist" class="sub">—</div>
+                  </div>
+                  <div class="level-box">
+                    <div class="lbl">Risk / Reward</div>
+                    <div id="p-rr" class="val num text-cyan">—</div>
+                    <div class="sub">potensi : risiko</div>
+                  </div>
+                  <div class="level-box">
+                    <div class="lbl">Alokasi</div>
+                    <div id="p-alloc" class="val num text-amber">—</div>
+                    <div class="sub">dari total modal</div>
+                  </div>
+                </div>
+
+                <!-- Kalkulator Posisi & Risiko (real-time) -->
+                <div class="calc-box mb-3">
+                  <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div class="lbl"><i class="fa-solid fa-calculator mr-1 text-cyan"></i>Kalkulator Posisi &amp; Risiko</div>
+                    <div class="flex items-center gap-1.5">
+                      <input id="calc-asset" type="number" min="0" step="any" value="1000" class="calc-input num" title="Modal portofolio" />
+                      <select id="calc-currency" class="calc-input" title="Mata uang">
+                        <option value="USD">USD ($)</option>
+                        <option value="IDR">IDR (Rp)</option>
+                      </select>
+                      <input id="calc-rate" type="number" min="0" step="any" value="16300" class="calc-input num hidden" title="Kurs USD -> IDR" placeholder="Kurs" />
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-4 gap-2 text-center">
+                    <div class="level-box">
+                      <div class="lbl">Porsi Masuk</div>
+                      <div id="calc-alloc" class="val num text-cyan">—</div>
+                    </div>
+                    <div class="level-box">
+                      <div class="lbl">Est. Koin</div>
+                      <div id="calc-qty" class="val num">—</div>
+                    </div>
+                    <div class="level-box level-sl">
+                      <div class="lbl">Risiko (SL)</div>
+                      <div id="calc-risk" class="val num text-bear">—</div>
+                    </div>
+                    <div class="level-box level-tp">
+                      <div class="lbl">Potensi (TP)</div>
+                      <div id="calc-reward" class="val num text-bull">—</div>
+                    </div>
+                  </div>
+                  <div class="mt-1.5 text-[10px] leading-snug text-muted">
+                    Porsi memakai batas bawah alokasi (<span id="calc-pct" class="num">—</span>); qty = porsi / harga live.
+                  </div>
+                </div>
+
+                <div class="mb-2">
+                  <div class="lbl mb-1"><i class="fa-solid fa-arrow-trend-up mr-1"></i>Trailing Stop Trigger</div>
+                  <div id="p-trailing" class="text-block">—</div>
+                </div>
+                <div>
+                  <div class="lbl mb-1"><i class="fa-solid fa-shield-halved mr-1"></i>Risk Note</div>
+                  <div id="p-note" class="text-block">—</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. Technical Breakdown & News Sentiment Feed -->
+            <div class="glass tech-card">
+              <div class="card-head">
+                <h3 class="card-title">
+                  <i class="fa-solid fa-microscope mr-2 text-cyan"></i>Technical Breakdown &amp; News
+                </h3>
+                <span id="news-count" class="text-[10.5px] text-muted">—</span>
+              </div>
+
+              <div class="scroll-area">
+                <div class="mb-3 flex items-center gap-4">
+                  <div id="g-overall" class="gauge gauge-compact">
+                    <span id="g-overall-value" class="num text-xl font-extrabold">—</span>
+                    <span class="text-[9px] uppercase tracking-wider text-muted">Score</span>
+                  </div>
+                  <div class="flex-1 space-y-2">
+                    <div>
+                      <div class="mb-0.5 flex justify-between text-[10.5px]"><span class="text-muted">Trend</span><span id="v-trend" class="num">—</span></div>
+                      <div class="bar-track"><div id="b-trend" class="bar-fill" style="background: var(--cyan)"></div></div>
+                    </div>
+                    <div>
+                      <div class="mb-0.5 flex justify-between text-[10.5px]"><span class="text-muted">Momentum</span><span id="v-momentum" class="num">—</span></div>
+                      <div class="bar-track"><div id="b-momentum" class="bar-fill" style="background: var(--bull)"></div></div>
+                    </div>
+                    <div>
+                      <div class="mb-0.5 flex justify-between text-[10.5px]"><span class="text-muted">Volatility</span><span id="v-volatility" class="num">—</span></div>
+                      <div class="bar-track"><div id="b-volatility" class="bar-fill" style="background: var(--amber)"></div></div>
+                    </div>
+                    <div>
+                      <div class="mb-0.5 flex justify-between text-[10.5px]"><span class="text-muted">Volume</span><span id="v-volume" class="num">—</span></div>
+                      <div class="bar-track"><div id="b-volume" class="bar-fill" style="background: var(--bear)"></div></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mb-2 grid grid-cols-4 gap-2 text-center">
+                  <div class="level-box">
+                    <div class="lbl">Rezim (ADX)</div>
+                    <div id="d-regime" class="val">—</div>
+                  </div>
+                  <div class="level-box">
+                    <div class="lbl">RSI 14</div>
+                    <div id="d-rsi" class="val num">—</div>
+                  </div>
+                  <div class="level-box">
+                    <div class="lbl">MACD Hist</div>
+                    <div id="d-macd" class="val num">—</div>
+                  </div>
+                  <div class="level-box">
+                    <div class="lbl">Vol Ratio</div>
+                    <div id="d-volratio" class="val num">—</div>
+                  </div>
+                </div>
+
+                <div class="mb-2 flex items-center justify-between text-[11px] text-muted">
+                  <span>Sentimen: <b id="d-sentiment" class="text-amber">—</b></span>
+                  <span>Final: <b id="d-final" class="num text-cyan">—</b></span>
+                </div>
+
+                <div class="mb-1 flex items-center justify-between">
+                  <span class="lbl"><i class="fa-regular fa-newspaper mr-1 text-amber"></i>News Sentiment (FinBERT)</span>
+                </div>
+                <div id="news-list" class="news-list">
+                  <div class="p-4 text-center text-muted">Memuat berita…</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
 
-    <footer class="mt-10 text-center text-[11px] text-muted/80">
-      Recy Crypto Intelligence Terminal • Data: CoinGecko • GNews + FinBERT • Fear &amp; Greed (alternative.me)<br />
-      Semua angka bersifat informatif — <b>bukan nasihat investasi</b>. Keputusan trading sepenuhnya tanggung jawab Anda.
+    <footer class="footer-note">
+      Recy Crypto Intelligence Terminal • Harga live: Binance public API • Riwayat: CoinGecko • Berita: GNews + FinBERT • Fear &amp; Greed (alternative.me) —
+      semua angka informatif, <b>bukan nasihat investasi</b>.
     </footer>
   </main>
+
+  <!-- Modal: Catat Posisi Beli -->
+  <div id="pf-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="mb-4 flex items-center justify-between">
+        <h3 class="font-display text-sm font-bold uppercase tracking-wider text-muted">
+          <i class="fa-solid fa-cart-shopping mr-2 text-bull"></i>Catat Posisi Beli
+        </h3>
+        <button id="pf-modal-close" class="wl-remove text-base" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="space-y-3">
+        <label class="block">
+          <span class="mb-1 block text-[10px] uppercase tracking-wider text-muted">Koin (id/nama/simbol)</span>
+          <input id="pf-coin" type="text" placeholder="misal: solana, doge, bitcoin" class="search-input search-full" />
+        </label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="mb-1 block text-[10px] uppercase tracking-wider text-muted">Harga Beli Riil (USD)</span>
+            <input id="pf-buy-price" type="number" min="0" step="any" placeholder="misal: 150.25" class="calc-input num w-full" />
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-[10px] uppercase tracking-wider text-muted">Jumlah Beli (koin)</span>
+            <input id="pf-amount" type="number" min="0" step="any" placeholder="misal: 2" class="calc-input num w-full" />
+          </label>
+        </div>
+        <label class="block">
+          <span class="mb-1 block text-[10px] uppercase tracking-wider text-muted">Catatan (opsional)</span>
+          <input id="pf-notes" type="text" placeholder="misal: DCA mingguan" class="search-input search-full" />
+        </label>
+        <button id="pf-save" class="btn-analyze w-full">
+          <i class="fa-solid fa-floppy-disk"></i> Simpan Posisi
+        </button>
+      </div>
+    </div>
+  </div>
 
   <div id="toast" class="toast"></div>
 

@@ -281,5 +281,185 @@ select.calc-input { width: auto; cursor: pointer; }
 .toast.err { border-color: rgba(255, 59, 105, 0.45); }
 
 @media (max-width: 900px) {
-  .wl-table th:nth-child(9), .wl-table td:nth-child(9) { display: none; } /* allocation */
+  .wl-table th, .wl-table td { padding-left: 8px; padding-right: 8px; }
+}
+
+/* ==========================================================================
+   Phase 7 — Full Compact Terminal (split 2 kolom, satu layar 1080p)
+   Kolom kiri ~35%: search + tab Watchlist/Portofolio (tabel kompak).
+   Kolom kanan ~65%: header koin live + chart + 2 kartu berdampingan.
+   Seluruh tinggi dipanjangkan ke viewport (tinggi penuh) di layar lebar,
+   sehingga dashboard muat tanpa scroll panjang — konten panjang menggulir
+   di dalam kartunya masing-masing.
+   ========================================================================== */
+
+.terminal-main { display: flex; flex-direction: column; }
+
+.terminal-grid {
+  display: grid;
+  grid-template-columns: minmax(420px, 35%) minmax(0, 1fr);
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+.col { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+
+/* Guard "hidden" milik kita — dipakai panel & #detail (tidak mengganggu
+   utilitas Tailwind lain seperti hidden sm:inline). */
+.left-panel.hidden,
+.right-body.hidden,
+.detail-empty.hidden { display: none !important; }
+
+/* ---------- Kolom kiri ---------- */
+.left-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.wl-scroll { flex: 1; min-height: 0; overflow: auto; }
+
+.search-full { width: 100%; max-width: none; }
+
+.panel-tabs { display: flex; gap: 6px; flex: none; }
+.panel-tab {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 8px 10px;
+  font-size: 12px; font-weight: 700;
+  color: var(--muted);
+  background: rgba(11, 14, 20, 0.55);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.panel-tab:hover { color: var(--text); border-color: #33436b; }
+.panel-tab.active {
+  color: var(--cyan);
+  border-color: rgba(0, 216, 255, 0.45);
+  background: rgba(0, 216, 255, 0.10);
+  box-shadow: 0 0 12px rgba(0, 216, 255, 0.14);
+}
+
+/* Tabel kompak (kiri sempit) */
+.wl-compact th { padding: 7px 8px; font-size: 10px; letter-spacing: 0.8px; }
+.wl-compact td { padding: 8px 8px; font-size: 12.5px; }
+.wl-compact .coin-icon { width: 22px; height: 22px; }
+.wl-compact .badge { padding: 3px 8px; font-size: 10.5px; }
+
+/* ---------- Kolom kanan ---------- */
+.topbar { position: sticky; top: 0; z-index: 50; }
+
+.coin-header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 11px 16px;
+  flex: none;
+}
+.coin-icon-lg { width: 38px; height: 38px; }
+
+.detail-empty {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; min-height: 150px;
+}
+
+.right-body { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
+
+.chart-card {
+  display: flex; flex-direction: column;
+  flex: 1; min-height: 170px;
+  overflow: hidden;
+}
+.chart-canvas { flex: 1; min-height: 150px; width: 100%; }
+
+/* Dua kartu berdampingan di bawah chart */
+.cards-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  height: clamp(240px, 45vh, 500px);
+  flex: none;
+}
+
+.exec-card, .tech-card {
+  display: flex; flex-direction: column;
+  min-height: 0; overflow: hidden;
+}
+.card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 12px 14px 0;
+  flex: none;
+}
+.card-title {
+  font-family: "Outfit", "Inter", sans-serif;
+  font-size: 12.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--muted);
+}
+.scroll-area { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px 14px; }
+.tech-card .scroll-area { display: flex; flex-direction: column; }
+
+/* Elemen kartu yang ringkas */
+.lbl {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--muted); font-weight: 600;
+}
+.val { margin-top: 2px; font-size: 15px; font-weight: 700; line-height: 1.25; }
+.sub { margin-top: 1px; font-size: 10px; color: var(--muted); line-height: 1.3; }
+
+/* className elemen ini ditimpa JS — styling by id agar tetap ringkas */
+#d-rsi, #d-macd, #pf-total-pnl {
+  margin-top: 2px; font-size: 14px; font-weight: 700; line-height: 1.25;
+}
+
+.exec-card .level-box,
+.tech-card .level-box { padding: 8px 10px; border-radius: 10px; }
+.left-panel .level-box { padding: 8px 10px; border-radius: 10px; }
+
+.exec-card .plan-banner { padding: 9px 12px; font-size: 12px; border-radius: 10px; }
+
+.calc-box {
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px 12px; background: rgba(11, 14, 20, 0.5);
+}
+.text-block {
+  border: 1px solid rgba(38, 50, 74, 0.6);
+  background: rgba(11, 14, 20, 0.5);
+  border-radius: 10px; padding: 8px 10px;
+  font-size: 11.5px; line-height: 1.5; color: var(--text);
+}
+
+.gauge-compact { width: 88px; height: 88px; }
+
+.news-list { flex: 1; min-height: 90px; overflow-y: auto; padding-right: 2px; }
+.news-list .news-item { padding: 8px 2px; }
+
+.footer-note {
+  margin-top: 8px; text-align: center;
+  font-size: 10px; line-height: 1.5;
+  color: rgba(138, 148, 168, 0.75);
+}
+
+/* Layar lebar & tinggi (monitor 1080p): kunci satu layar tanpa scroll */
+@media (min-width: 1280px) and (min-height: 640px) {
+  html, body { height: 100%; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  .terminal-main { flex: 1; min-height: 0; }
+}
+
+/* Layar sempit / stacked: kembali ke scroll normal, chart tetap terlihat */
+@media (max-width: 1279px) {
+  .terminal-grid { grid-template-columns: 1fr; }
+  .left-panel { flex: none; overflow: visible; }
+  .detail-empty { flex: none; }
+  .right-body { flex: none; }
+  .chart-card { flex: none; }
+  .chart-canvas { height: 300px; flex: none; }
+  .cards-row { grid-template-columns: 1fr; height: auto; }
+  .exec-card, .tech-card { overflow: visible; }
+  .scroll-area { overflow: visible; }
+  .news-list { max-height: 340px; }
 }

@@ -34,6 +34,7 @@ def build_execution_plan(
     current_price: float,
     atr_14: float = None,
     recommendation: str = "HOLD",
+    price_source: str = "coingecko",
 ) -> dict:
     """Susun parameter eksekusi praktis dari harga saat ini + ATR 14.
 
@@ -46,6 +47,10 @@ def build_execution_plan(
     - suggested_allocation_pct: porsi modal (BTC/ETH 10-15%, altcoin 3-5%)
 
     Semua angka bersifat informatif — bukan nasihat investasi.
+
+    `price_source` : asal `current_price` ("binance" = harga live bursa,
+        "coingecko" = fallback harian) — diteruskan ke UI sebagai label
+        sumber harga agar pengguna tahu apakah angka sudah real-time.
     """
     current_price = float(current_price)
 
@@ -144,6 +149,7 @@ def build_execution_plan(
 
     return {
         "current_price": _round_price(current_price),
+        "price_source": price_source,
         "stop_loss_price": stop_loss,
         "take_profit_price": take_profit,
         "trailing_stop_trigger": trailing_stop_trigger,
@@ -177,6 +183,7 @@ def generate_recommendation(
     coin_id: str = None,
     current_price: float = None,
     atr_14: float = None,
+    price_source: str = "coingecko",
 ) -> dict:
     """Threshold rekomendasi configurable (default 70/30 = baseline lama).
 
@@ -192,7 +199,8 @@ def generate_recommendation(
     Parameter eksekusi (Personal Trading Edition):
     - Bila `current_price` diberikan, hasil menyertakan blok `execution`
       (SL/TP dari ATR, trailing trigger, risk:reward, alokasi modal) via
-      `build_execution_plan`.
+      `build_execution_plan`. `price_source` diteruskan ke blok execution
+      ("binance" bila harga live bursa dipakai, selain itu "coingecko").
     """
 
     if technical_score >= buy_threshold and not trend_filter_ok:
@@ -256,6 +264,7 @@ def generate_recommendation(
             current_price=current_price,
             atr_14=atr_14,
             recommendation=recommendation,
+            price_source=price_source,
         )
 
     return result
