@@ -14,7 +14,55 @@
 const POLL_WATCHLIST_MS = 45_000;
 const POLL_DETAIL_MS = 60_000;      // history + technical (murah, di-cache)
 const POLL_ANALYSIS_MS = 300_000;   // execution + news (FinBERT)
-const POLL_LIVE_MS = 5_000;         // harga live Binance (detik per detik)
+const POLL_LIVE_MS = 5_000;         // fallback HTTP polling bila WebSocket offline
+
+const BINANCE_WS_URLS = [
+  "wss://data-stream.binance.vision/ws/!miniTicker@arr",
+  "wss://stream.binance.com:9443/ws/!miniTicker@arr",
+];
+
+const BINANCE_SYMBOLS = {
+  bitcoin: "BTCUSDT",
+  ethereum: "ETHUSDT",
+  solana: "SOLUSDT",
+  binancecoin: "BNBUSDT",
+  ripple: "XRPUSDT",
+  dogecoin: "DOGEUSDT",
+  cardano: "ADAUSDT",
+  sui: "SUIUSDT",
+  "avalanche-2": "AVAXUSDT",
+  polkadot: "DOTUSDT",
+  chainlink: "LINKUSDT",
+  litecoin: "LTCUSDT",
+  tron: "TRXUSDT",
+  "the-open-network": "TONUSDT",
+  cosmos: "ATOMUSDT",
+  algorand: "ALGOUSDT",
+  "ethereum-classic": "ETCUSDT",
+  stellar: "XLMUSDT",
+  "bitcoin-cash": "BCHUSDT",
+  pepe: "PEPEUSDT",
+  "shiba-inu": "SHIBUSDT",
+  "hedera-hashgraph": "HBARUSDT",
+  aptos: "APTUSDT",
+  arbitrum: "ARBUSDT",
+  optimism: "OPUSDT",
+  uniswap: "UNIUSDT",
+  "polygon-ecosystem-token": "POLUSDT",
+  near: "NEARUSDT",
+  "internet-computer": "ICPUSDT",
+  filecoin: "FILUSDT",
+  "injective-protocol": "INJUSDT",
+  aave: "AAVEUSDT",
+  "render-token": "RENDERUSDT",
+  arweave: "ARUSDT",
+  "worldcoin-wld": "WLDUSDT",
+};
+
+let binanceWs = null;
+let wsReconnectTimer = null;
+let wsUrlIdx = 0;
+let wsActive = false;
 
 const TIMEFRAMES = { "7D": 7, "30D": 30, "90D": 90, "1Y": 365 };
 const DEFAULT_COINS = ["bitcoin", "ethereum", "solana", "binancecoin", "ripple"];
@@ -641,11 +689,18 @@ function setCoinHeader(c) {
     chEl.className = "num text-sm font-bold text-muted";
   }
 
-  // Sumber harga: live Binance vs fallback CoinGecko
-  const live = c.price_source === "binance";
+  // Sumber harga: WebSocket Binance vs REST vs fallback CoinGecko
   const srcEl = $("#d-source");
-  srcEl.textContent = live ? "live • binance" : "coingecko • fallback";
-  srcEl.className = live ? "text-bull" : "text-amber";
+  if (c.price_source === "binance_ws") {
+    srcEl.textContent = "live • binance ws";
+    srcEl.className = "text-cyan font-semibold";
+  } else if (c.price_source === "binance") {
+    srcEl.textContent = "live • binance rest";
+    srcEl.className = "text-bull";
+  } else {
+    srcEl.textContent = "coingecko • fallback";
+    srcEl.className = "text-amber";
+  }
 }
 
 function patchDetailLive(c) {
@@ -703,6 +758,153 @@ function applyLiveItems(items) {
   // 3. Header koin terpilih + kartu execution (bila koin tsb dipilih).
   const sel = state.coins.find((c) => c.coin_id === state.selected);
   if (sel) patchDetailLive(sel);
+}
+
+/* ==================== Binance WebSocket Integration ==================== */
+
+function fallbackToHttpPolling() {
+  const dot = $("#ws-dot");
+  const text = $("#ws-text");
+  if (dot) dot.className = "live-dot ws-offline";
+  if (text) text.textContent = "Live Stream Offline (HTTP Fallback)";
+  if (!state.timers.live) {
+    state.timers.live = setInterval(pollLivePrices, POLL_LIVE_MS);
+    pollLivePrices();
+  }
+}
+
+function scheduleWsReconnect() {
+  clearTimeout(wsReconnectTimer);
+  wsReconnectTimer = setTimeout(() => {
+    initBinanceWebSocket();
+  }, 3500);
+}
+
+function handleWsTickerBatch(tickers) {
+  if (!Array.isArray(tickers) || !state.coins.length) return;
+  const tickerMap = new Map();
+  for (const t of tickers) {
+    if (t && t.s) tickerMap.set(t.s, t);
+  }
+
+  let updatedCount = 0;
+  for (const c of state.coins) {
+    const sym = BINANCE_SYMBOLS[c.coin_id] || (c.symbol ? `${c.symbol.toUpperCase()}USDT` : null);
+    if (!sym || !tickerMap.has(sym)) continue;
+
+    const t = tickerMap.get(sym);
+    const newPrice = Number(t.c);
+    const openPrice = Number(t.o);
+    if (Number.isNaN(newPrice)) continue;
+
+    const prevPrice = c.price != null ? Number(c.price) : null;
+    const movedUp = prevPrice != null && newPrice > prevPrice;
+    const movedDown = prevPrice != null && newPrice < prevPrice;
+
+    c.price = newPrice;
+    if (openPrice > 0) {
+      c.change_24h_pct = ((newPrice - openPrice) / openPrice) * 100;
+    }
+    c.price_source = "binance_ws";
+    updatedCount++;
+
+    // Update baris DOM watchlist secara langsung
+    const tr = document.querySelector(`#watchlist-body tr[data-coin="${c.coin_id}"]`);
+    if (tr) {
+      const priceEl = tr.querySelector(".cell-price");
+      if (priceEl) {
+        priceEl.innerHTML = `$${fmtPrice(newPrice)}${c.error ? `<div class="text-[9.5px] text-bear">error</div>` : ""}`;
+        if (movedUp) {
+          priceEl.classList.remove("price-flash-down");
+          priceEl.classList.add("price-flash-up");
+          setTimeout(() => priceEl.classList.remove("price-flash-up"), 600);
+        } else if (movedDown) {
+          priceEl.classList.remove("price-flash-up");
+          priceEl.classList.add("price-flash-down");
+          setTimeout(() => priceEl.classList.remove("price-flash-down"), 600);
+        }
+      }
+    }
+
+    // Bila koin ini sedang dipilih, perbarui header & kartu eksekusi
+    if (state.selected && c.coin_id === state.selected) {
+      patchDetailLive(c);
+      const dPrice = $("#d-price");
+      if (dPrice) {
+        if (movedUp) {
+          dPrice.classList.remove("price-flash-down");
+          dPrice.classList.add("price-flash-up");
+          setTimeout(() => dPrice.classList.remove("price-flash-up"), 600);
+        } else if (movedDown) {
+          dPrice.classList.remove("price-flash-up");
+          dPrice.classList.add("price-flash-down");
+          setTimeout(() => dPrice.classList.remove("price-flash-down"), 600);
+        }
+      }
+    }
+  }
+
+  if (updatedCount > 0) {
+    const el = $("#wl-updated");
+    if (el) el.textContent = `ws live ${new Date().toLocaleTimeString("id-ID")}`;
+  }
+}
+
+function initBinanceWebSocket() {
+  if (binanceWs) {
+    try { binanceWs.close(); } catch (_) {}
+    binanceWs = null;
+  }
+
+  const url = BINANCE_WS_URLS[wsUrlIdx];
+  const dot = $("#ws-dot");
+  const text = $("#ws-text");
+
+  try {
+    binanceWs = new WebSocket(url);
+  } catch (err) {
+    console.warn("[WS] Init failed:", err);
+    fallbackToHttpPolling();
+    scheduleWsReconnect();
+    return;
+  }
+
+  binanceWs.onopen = () => {
+    wsActive = true;
+    clearTimeout(wsReconnectTimer);
+    if (dot) {
+      dot.className = "live-dot ws-live";
+    }
+    if (text) {
+      text.textContent = "Binance WS Stream Live (Sub-detik)";
+    }
+    // Hentikan polling HTTP cepat agar zero-load ke server
+    if (state.timers.live) {
+      clearInterval(state.timers.live);
+      state.timers.live = null;
+    }
+  };
+
+  binanceWs.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      handleWsTickerBatch(data);
+    } catch (err) {
+      console.warn("[WS] Parse error:", err);
+    }
+  };
+
+  binanceWs.onerror = (err) => {
+    console.warn("[WS] Error encountered, switching host:", err);
+    wsUrlIdx = (wsUrlIdx + 1) % BINANCE_WS_URLS.length;
+    fallbackToHttpPolling();
+  };
+
+  binanceWs.onclose = () => {
+    wsActive = false;
+    fallbackToHttpPolling();
+    scheduleWsReconnect();
+  };
 }
 
 async function pollLivePrices() {
@@ -776,9 +978,10 @@ async function loadDetail(coinId, { withAnalysis = false } = {}) {
 /* ---------------- Polling & boot ---------------- */
 
 function startPolling() {
-  // Harga live Binance + SL/TP: tiap 5 detik (endpoint ringan, cache BE 5 dtk).
-  state.timers.live = setInterval(pollLivePrices, POLL_LIVE_MS);
+  // 1. Hubungkan WebSocket Binance publik (sub-detik stream)
+  initBinanceWebSocket();
 
+  // 2. Polling watchlist & portofolio (status kalkulasi makro & sentimen)
   state.timers.watchlist = setInterval(() => {
     loadWatchlist();
     loadPortfolio();
@@ -812,8 +1015,13 @@ async function refreshChart() {
 function pausePolling() {
   clearInterval(state.timers.watchlist);
   clearInterval(state.timers.analysis);
-  clearInterval(state.timers.live);
+  if (state.timers.live) clearInterval(state.timers.live);
   state.timers = {};
+  clearTimeout(wsReconnectTimer);
+  if (binanceWs) {
+    try { binanceWs.close(); } catch (_) {}
+    binanceWs = null;
+  }
 }
 
 function resumePolling() {
