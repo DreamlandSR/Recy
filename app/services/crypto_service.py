@@ -377,3 +377,126 @@ async def get_binance_24h_changes(coin_ids=None) -> dict:
         except (KeyError, TypeError, ValueError):
             continue
     return out
+
+
+# ============================================================================
+# Binance klines — candle OHLCV intraday (tanpa API key, publik)
+# ============================================================================
+#
+# Grafik dashboard tadinya hanya harga harian CoinGecko (cache 5 menit).
+# Endpoint `/api/v3/klines` Binance menyediakan candle OHLCV nyata
+# (15m/1h/4h/1d, ...) gratis tanpa API key sehingga chart bisa bergerak
+# seperti terminal trading sungguhan. Gagal -> None (pemanggil fallback
+# ke riwayat CoinGecko, tanpa exception).
+
+BINANCE_KLINES_PATH = "/api/v3/klines"
+
+# Interval yang diizinkan (whitelist — mencegah input aneh memicu request).
+BINANCE_KLINES_INTERVALS = frozenset({"15m", "30m", "1h", "4h", "1d"})
+
+# TTL per jenis interval: intraday berubah cepat (30 detik), harian pelan
+# (5 menit — sama dengan cache history CoinGecko).
+KLINES_TTL_INTRADAY = 30.0
+KLINES_TTL_DAILY = 5 * 60.0
+
+_klines_cache = TTLCache()
+_klines_last_warn = 0.0
+_klines_host_ok = None  # host terakhir berhasil -> diprioritaskan
+
+
+async def get_binance_klines(
+    coin_id: str,
+    interval: str = "1h",
+    limit: int = 200,
+) -> dict | None:
+    """Candle OHLCV Binance untuk satu koin — siap pakai Lightweight Charts.
+
+    Return None bila koin tanpa pasangan USDT, interval tidak di whitelist,
+    atau SEMUA host Binance gagal (tidak pernah melempar exception).
+
+    Payload:
+    {
+      "symbol": "BTCUSDT", "interval": "1h", "source": "binance",
+      "bars": [{"time": 1712345678, "open": .., "high": ..,
+                "low": .., "close": .., "volume": ..}, ...],
+    }
+    "time" = detik (epoch open time) — format native Lightweight Charts.
+    """
+    if interval not in BINANCE_KLINES_INTERVALS:
+        return None
+    symbol = BINANCE_SYMBOLS.get(coin_id)
+    if not symbol:
+        return None
+
+    limit = max(10, min(int(limit), 1000))
+    ttl = KLINES_TTL_DAILY if interval == "1d" else KLINES_TTL_INTRADAY
+
+    key = ("klines", symbol, interval, limit)
+    cached, hit = _klines_cache.get(key)
+    if hit:
+        return cached
+
+    params = {"symbol": symbol, "interval": interval, "limit": limit}
+
+    global _klines_host_ok
+    hosts = BINANCE_HOSTS
+    if _klines_host_ok in BINANCE_HOSTS:
+        hosts = (_klines_host_ok,) + tuple(
+            h for h in BINANCE_HOSTS if h != _klines_host_ok
+        )
+
+    rows = None
+    last_exc = None
+    for host in hosts:
+        try:
+            async with httpx.AsyncClient(trust_env=False, timeout=BINANCE_TIMEOUT) as client:
+                response = await client.get(
+                    host + BINANCE_KLINES_PATH, params=params
+                )
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, list):
+                raise RuntimeError(f"respons bukan list ({type(data).__name__})")
+            rows = data
+            _klines_host_ok = host
+            break
+        except Exception as exc:  # noqa: BLE001 — klines bersifat opsional
+            last_exc = exc
+
+    if rows is None:
+        global _klines_last_warn
+        now = time.monotonic()
+        if last_exc is not None and now - _klines_last_warn >= 60.0:
+            _klines_last_warn = now
+            print(
+                f"[Binance] klines {symbol}/{interval} gagal: "
+                f"{type(last_exc).__name__}: {last_exc} — fallback CoinGecko.",
+                flush=True,
+            )
+        _klines_cache.set(key, None, BINANCE_FAIL_TTL)
+        return None
+
+    bars = []
+    for row in rows:
+        # Format resmi Binance: [openTime, open, high, low, close, volume,
+        # closeTime, quoteVolume, trades, ...] — semua string kecuali waktu.
+        try:
+            bars.append({
+                "time": int(row[0]) // 1000,
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": float(row[5]),
+            })
+        except (IndexError, TypeError, ValueError):
+            continue
+
+    payload = {
+        "symbol": symbol,
+        "interval": interval,
+        "source": "binance",
+        "bars": bars,
+    }
+    _klines_cache.set(key, payload, ttl)
+    return payload

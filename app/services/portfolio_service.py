@@ -43,13 +43,16 @@ _lock = threading.Lock()
 
 def _load() -> dict:
     if not DATA_PATH.exists():
-        return {"positions": []}
+        return {"positions": [], "closed_positions": []}
     try:
         data = json.loads(DATA_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"positions": []}
+        return {"positions": [], "closed_positions": []}
     if not isinstance(data, dict) or not isinstance(data.get("positions"), list):
-        return {"positions": []}
+        return {"positions": [], "closed_positions": []}
+    # File lama mungkin belum punya kunci closed_positions (Phase 8).
+    if not isinstance(data.get("closed_positions"), list):
+        data["closed_positions"] = []
     return data
 
 
@@ -103,6 +106,130 @@ def delete_position(position_id: str):
 def list_raw() -> list:
     with _lock:
         return list(_load()["positions"])
+
+
+# Alasan penutupan posisi yang valid (Phase 8 — Closed Trades Tracker).
+CLOSE_REASONS = frozenset({"TP", "SL", "MANUAL"})
+
+
+async def _default_exit_price(coin_id: str) -> float:
+    """Harga live untuk exit_price default: Binance -> CoinGecko fallback."""
+    try:
+        live = await get_binance_live_prices([coin_id])
+        if live.get(coin_id):
+            return float(live[coin_id])
+    except Exception:
+        pass
+    snap = await _live_snapshot(coin_id)  # pipeline penuh (history cache 5 mnt)
+    return float(snap["current_price"])
+
+
+async def close_position(
+    position_id: str,
+    exit_price: float = None,
+    exit_reason: str = "MANUAL",
+) -> dict:
+    """Tutup satu posisi aktif -> pindah ke jurnal ``closed_positions``.
+
+    Menghitung realized PnL (USD & %) terhadap harga beli. ``exit_price``
+    default memakai harga live Binance (fallback CoinGecko). ``exit_reason``
+    salah satu dari TP / SL / MANUAL.
+
+    Raises ValueError bila posisi tidak ada, alasan tidak valid, atau
+    harga live tidak tersedia (ketika exit_price tidak diberikan).
+    """
+    reason = (exit_reason or "MANUAL").strip().upper()
+    if reason not in CLOSE_REASONS:
+        raise ValueError(f"exit_reason harus salah satu dari {sorted(CLOSE_REASONS)}.")
+
+    with _lock:
+        data = _load()
+        pos = next((p for p in data["positions"] if p.get("id") == position_id), None)
+        if pos is None:
+            raise LookupError("Posisi tidak ditemukan.")
+
+    if exit_price is None:
+        exit_price = await _default_exit_price(pos["coin_id"])
+        if not exit_price or exit_price <= 0:
+            raise ValueError(
+                "Harga live tidak tersedia — isi exit_price secara manual."
+            )
+    exit_price = float(exit_price)
+    if exit_price <= 0:
+        raise ValueError("exit_price harus lebih besar dari 0.")
+
+    buy = float(pos["buy_price"])
+    amount = float(pos["amount"])
+    realized_usd = (exit_price - buy) * amount
+    realized_pct = ((exit_price / buy) - 1) * 100 if buy > 0 else 0.0
+
+    closed = {
+        "id": uuid.uuid4().hex[:12],
+        "position_id": position_id,
+        "coin_id": pos["coin_id"],
+        "buy_price": buy,
+        "amount": amount,
+        "notes": pos.get("notes", ""),
+        "opened_at": pos.get("created_at"),
+        "closed_at": datetime.now(timezone.utc).isoformat(),
+        "exit_price": exit_price,
+        "exit_reason": reason,
+        "realized_pnl_usd": round(realized_usd, 2),
+        "realized_pnl_pct": round(realized_pct, 4),
+    }
+
+    with _lock:
+        data = _load()
+        remaining = [p for p in data["positions"] if p.get("id") != position_id]
+        if len(remaining) == len(data["positions"]):
+            # Balapan dengan delete — anggap sudah tertutup.
+            raise LookupError("Posisi tidak ditemukan.")
+        data["positions"] = remaining
+        data["closed_positions"].append(closed)
+        _save(data)
+
+    return closed
+
+
+def list_closed_raw() -> list:
+    with _lock:
+        return list(_load()["closed_positions"])
+
+
+async def list_closed() -> list:
+    """Riwayat trade tertutup, terbaru dulu, + nama/simbol koin."""
+    raw = list_closed_raw()
+    meta = await _coin_names({c["coin_id"] for c in raw})
+    out = []
+    for c in sorted(raw, key=lambda x: x.get("closed_at") or "", reverse=True):
+        item = dict(c)
+        info = meta.get(c["coin_id"], {})
+        item["name"] = info.get("name", c["coin_id"])
+        item["symbol"] = info.get("symbol", c["coin_id"][:6].upper())
+        out.append(item)
+    return out
+
+
+async def closed_summary() -> dict:
+    """Metrik gabungan trade tertutup (Phase 8).
+
+    Returns: total_realized_pnl_usd, win_rate_pct, total_closed_trades,
+    win_count, loss_count + daftar ``closed_positions`` (terbaru dulu).
+    """
+    closed = await list_closed()
+    total = len(closed)
+    wins = sum(1 for c in closed if c.get("realized_pnl_usd", 0) > 0)
+    losses = total - wins
+    total_pnl = sum(c.get("realized_pnl_usd") or 0.0 for c in closed)
+
+    return {
+        "total_realized_pnl_usd": round(total_pnl, 2),
+        "win_rate_pct": round(wins / total * 100, 1) if total else 0.0,
+        "total_closed_trades": total,
+        "win_count": wins,
+        "loss_count": losses,
+        "closed_positions": closed,
+    }
 
 
 # =====================================================================

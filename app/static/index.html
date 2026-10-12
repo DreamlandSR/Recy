@@ -60,6 +60,19 @@
       </div>
 
       <div class="flex items-center gap-2.5">
+        <!-- Notifikasi desktop native (Web Notification API) -->
+        <button id="btn-notif" class="btn-analyze" title="Notifikasi desktop native: sinyal BUY & posisi mendekati SL/Trailing tanpa bot Telegram">
+          <i class="fa-solid fa-bell"></i> Notifikasi: <span id="notif-state">Nonaktif</span>
+        </button>
+        <!-- Ringkasan portofolio live (selalu terlihat) -->
+        <div id="pf-chip" class="glass flex items-center gap-2.5 px-3.5 py-1.5 text-sm" title="Ringkasan portofolio: nilai saat ini & floating PnL">
+          <i class="fa-solid fa-wallet text-bull"></i>
+          <div class="leading-tight">
+            <div class="text-[9.5px] uppercase tracking-wider text-muted">Portofolio</div>
+            <div id="pf-chip-value" class="num font-bold text-cyan">—</div>
+          </div>
+          <div id="pf-chip-pnl" class="num text-[11px] font-bold text-muted">—</div>
+        </div>
         <!-- Fear & Greed chip -->
         <div id="fng-chip" class="glass flex items-center gap-2.5 px-3.5 py-1.5 text-sm" title="Fear & Greed Index (alternative.me)">
           <i class="fa-solid fa-gauge-high text-amber"></i>
@@ -88,6 +101,7 @@
           <div class="flex items-center gap-2">
             <input id="input-add-coin" type="text" placeholder="Tambah koin (dogecoin, cardano, sui)…" class="search-input search-full" />
             <button id="btn-add-coin" class="btn-analyze whitespace-nowrap"><i class="fa-solid fa-plus"></i> Tambah</button>
+            <button id="btn-alerts" class="btn-analyze" title="Alert harga custom — beritahu saat harga menyentuh target (desktop & Telegram)"><i class="fa-solid fa-bell-plus"></i></button>
           </div>
           <div class="mt-2 flex items-center justify-between gap-2 text-[10.5px] text-muted">
             <span id="wl-updated">—</span>
@@ -105,8 +119,22 @@
           </button>
         </div>
 
-        <!-- Watchlist table compact -->
+        <!-- Watchlist table compact + quick filter scanner -->
         <section id="watchlist-panel" class="glass left-panel">
+          <div class="wl-filters" role="group" aria-label="Filter cepat watchlist">
+            <button class="chip active" data-filter="all">Semua</button>
+            <button class="chip" data-filter="buy">Hanya BUY</button>
+            <button class="chip" data-filter="near_sl">Dekat Stop-Loss</button>
+            <button class="chip" data-filter="trending">Trending (ADX &ge; 25)</button>
+            <select id="wl-sort" class="chip chip-select" title="Urutkan watchlist">
+              <option value="default">Urut: default</option>
+              <option value="change_desc">%24h tertinggi</option>
+              <option value="price_desc">Harga tertinggi</option>
+              <option value="signal">Sinyal (BUY dulu)</option>
+              <option value="adx_desc">ADX tertinggi</option>
+            </select>
+            <span id="wl-filter-count" class="wl-filter-count"></span>
+          </div>
           <div class="wl-scroll">
             <table class="wl-table wl-compact">
               <thead>
@@ -126,49 +154,99 @@
           </div>
         </section>
 
-        <!-- Portofolio posisi aktif -->
+        <!-- Portofolio: posisi aktif + riwayat trade selesai -->
         <section id="portfolio-panel" class="glass left-panel hidden">
           <div class="wl-scroll">
-            <div class="flex items-center justify-between gap-2 px-4 py-3">
+            <div class="flex items-center justify-between gap-2 px-4 pt-3">
               <div class="text-[11px] text-muted">Jurnal pribadi • PnL mengambang live, status SL &amp; trailing</div>
               <button id="btn-add-position" class="btn-analyze whitespace-nowrap">
                 <i class="fa-solid fa-plus"></i> Catat Posisi
               </button>
             </div>
-            <div class="grid grid-cols-2 gap-2 px-4 pb-3">
-              <div class="level-box">
-                <div class="lbl">Total Modal</div>
-                <div id="pf-total-cost" class="val num">—</div>
+
+            <!-- Sub-tab: Posisi Aktif <-> Riwayat Trade Selesai -->
+            <div class="pf-subtabs px-4 pt-2.5">
+              <button class="pf-subtab active" data-view="pf-active-view">
+                <i class="fa-solid fa-layer-group"></i> Posisi Aktif
+              </button>
+              <button class="pf-subtab" data-view="pf-history-view">
+                <i class="fa-solid fa-clock-rotate-left"></i> Riwayat Trade Selesai
+              </button>
+            </div>
+
+            <!-- View 1: posisi aktif -->
+            <div id="pf-active-view" class="pf-view">
+              <div class="grid grid-cols-2 gap-2 px-4 py-3">
+                <div class="level-box">
+                  <div class="lbl">Total Modal</div>
+                  <div id="pf-total-cost" class="val num">—</div>
+                </div>
+                <div class="level-box">
+                  <div class="lbl">Nilai Saat Ini</div>
+                  <div id="pf-total-value" class="val num text-cyan">—</div>
+                </div>
+                <div class="level-box">
+                  <div class="lbl">Floating PnL</div>
+                  <div id="pf-total-pnl" class="val num">—</div>
+                </div>
+                <div class="level-box">
+                  <div class="lbl">Posisi Aktif</div>
+                  <div id="pf-count" class="val num text-amber">—</div>
+                </div>
               </div>
-              <div class="level-box">
-                <div class="lbl">Nilai Saat Ini</div>
-                <div id="pf-total-value" class="val num text-cyan">—</div>
-              </div>
-              <div class="level-box">
-                <div class="lbl">Floating PnL</div>
-                <div id="pf-total-pnl" class="val num">—</div>
-              </div>
-              <div class="level-box">
-                <div class="lbl">Posisi Aktif</div>
-                <div id="pf-count" class="val num text-amber">—</div>
+              <div class="overflow-x-auto">
+                <table class="wl-table wl-compact">
+                  <thead>
+                    <tr class="bg-obsidian/40">
+                      <th>Coin</th>
+                      <th>Harga</th>
+                      <th class="text-right">PnL</th>
+                      <th class="text-center">SL</th>
+                      <th class="text-center">Trail</th>
+                      <th class="text-center" title="Aksi"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="portfolio-body">
+                    <tr><td colspan="6" class="p-6 text-center text-muted">Memuat portofolio…</td></tr>
+                  </tbody>
+                </table>
               </div>
             </div>
-            <div class="overflow-x-auto">
-              <table class="wl-table wl-compact">
-                <thead>
-                  <tr class="bg-obsidian/40">
-                    <th>Coin</th>
-                    <th>Harga</th>
-                    <th class="text-right">PnL</th>
-                    <th class="text-center">SL</th>
-                    <th class="text-center">Trail</th>
-                    <th class="text-center" title="Aksi"></th>
-                  </tr>
-                </thead>
-                <tbody id="portfolio-body">
-                  <tr><td colspan="6" class="p-6 text-center text-muted">Memuat portofolio…</td></tr>
-                </tbody>
-              </table>
+
+            <!-- View 2: riwayat trade selesai (realized PnL) -->
+            <div id="pf-history-view" class="pf-view hidden">
+              <div class="grid grid-cols-2 gap-2 px-4 py-3">
+                <div class="level-box">
+                  <div class="lbl">Total Profit Bersih</div>
+                  <div id="pf-realized-pnl" class="val num">—</div>
+                </div>
+                <div class="level-box">
+                  <div class="lbl">Win Rate Riil</div>
+                  <div id="pf-winrate" class="val num text-cyan">—</div>
+                </div>
+              </div>
+              <div class="flex items-center justify-between px-4 pb-1">
+                <span class="lbl"><i class="fa-solid fa-chart-line mr-1 text-cyan"></i>Equity Curve (Realized PnL Kumulatif)</span>
+                <button id="btn-csv" class="btn-analyze whitespace-nowrap" title="Unduh riwayat trade selesai sebagai CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
+              </div>
+              <div id="equity-wrap" class="px-4 pb-2"><div id="equity-chart"></div></div>
+              <div class="overflow-x-auto">
+                <table class="wl-table wl-compact">
+                  <thead>
+                    <tr class="bg-obsidian/40">
+                      <th>Coin</th>
+                      <th>Tgl Beli</th>
+                      <th class="text-right">Masuk</th>
+                      <th>Tgl Jual</th>
+                      <th class="text-right">Keluar</th>
+                      <th class="text-right">PnL</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pf-history-body">
+                    <tr><td colspan="6" class="p-6 text-center text-muted">Memuat riwayat…</td></tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -213,12 +291,16 @@
             <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
               <div class="flex items-center gap-1.5">
                 <span class="mr-1 text-[10px] uppercase tracking-wider text-muted">Timeframe</span>
+                <button class="tf-btn" data-tf="15m">15m</button>
+                <button class="tf-btn" data-tf="1h">1h</button>
+                <button class="tf-btn" data-tf="4h">4h</button>
+                <button class="tf-btn" data-tf="1D">1D</button>
                 <button class="tf-btn" data-tf="7D">7D</button>
                 <button class="tf-btn" data-tf="30D">30D</button>
                 <button class="tf-btn active" data-tf="90D">90D</button>
                 <button class="tf-btn" data-tf="1Y">1Y</button>
               </div>
-              <span class="text-[10.5px] text-muted">Area + Volume • CoinGecko daily • SL/TP dari harga live Binance</span>
+              <span class="text-[10.5px] text-muted">Candle Binance (15m–1D) • Area CoinGecko (7D–1Y) • garis SL/TP otomatis</span>
             </div>
             <div id="chart" class="chart-canvas"></div>
           </div>
@@ -231,11 +313,15 @@
                 <h3 class="card-title">
                   <i class="fa-solid fa-bullseye mr-2 text-bull"></i>Execution Plan &amp; Position Calculator
                 </h3>
+                <button id="btn-backtest" class="btn-analyze whitespace-nowrap" title="Backtest sinyal teknikal 365 hari terakhir — mesin walk-forward yang sama dengan 29 unit test (tanpa lookahead)">
+                  <i class="fa-solid fa-flask"></i> Uji Strategi
+                </button>
               </div>
               <div class="scroll-area">
                 <div id="plan-banner" class="plan-banner plan-hold mb-3">
                   <i class="fa-solid fa-hourglass-half"></i><span>Memuat rencana…</span>
                 </div>
+                <div id="bt-panel" class="bt-panel hidden mb-3"></div>
 
                 <div class="mb-3 grid grid-cols-4 gap-2">
                   <div class="level-box level-sl">
@@ -385,6 +471,33 @@
     </footer>
   </main>
 
+  <!-- Modal: Alert Harga Custom -->
+  <div id="alert-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="mb-4 flex items-center justify-between">
+        <h3 class="font-display text-sm font-bold uppercase tracking-wider text-muted">
+          <i class="fa-solid fa-bell-plus mr-2 text-amber"></i>Alert Harga Custom
+        </h3>
+        <button id="alert-modal-close" class="wl-remove text-base" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="space-y-3">
+        <div class="al-form">
+          <input id="al-coin" type="text" placeholder="koin (btc, solana…)" class="search-input" />
+          <select id="al-dir" class="calc-input" title="Arah alert">
+            <option value="ABOVE">≥ di atas</option>
+            <option value="BELOW">≤ di bawah</option>
+          </select>
+          <input id="al-target" type="number" min="0" step="any" placeholder="target $" class="calc-input num" title="Target harga (USD)" />
+          <button id="al-save" class="btn-analyze whitespace-nowrap"><i class="fa-solid fa-plus"></i> Tambah</button>
+        </div>
+        <div id="al-list" class="al-list"></div>
+        <div class="text-[10px] leading-snug text-muted">
+          Dievaluasi otomatis dari harga live Binance tiap ~5 detik — reaksi dalam hitungan detik. Sekali tembak; notifikasi desktop &amp; Telegram (bila dikonfigurasi).
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Catat Posisi Beli -->
   <div id="pf-modal" class="modal-overlay hidden">
     <div class="modal-card">
@@ -416,6 +529,39 @@
         <button id="pf-save" class="btn-analyze w-full">
           <i class="fa-solid fa-floppy-disk"></i> Simpan Posisi
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Tutup Posisi (realized PnL) -->
+  <div id="close-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="mb-4 flex items-center justify-between">
+        <h3 class="font-display text-sm font-bold uppercase tracking-wider text-muted">
+          <i class="fa-solid fa-flag-checkered mr-2 text-amber"></i>Tutup Posisi
+        </h3>
+        <button id="close-modal-cancel-x" class="wl-remove text-base" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="space-y-3">
+        <div id="close-label" class="text-block">—</div>
+        <label class="block">
+          <span class="mb-1 block text-[10px] uppercase tracking-wider text-muted">Harga Keluar (USD) — kosongkan = harga live saat ini</span>
+          <input id="close-price" type="number" min="0" step="any" placeholder="misal: 85000" class="calc-input num w-full" />
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-[10px] uppercase tracking-wider text-muted">Alasan Tutup</span>
+          <select id="close-reason" class="calc-input w-full">
+            <option value="MANUAL">MANUAL — keputusan manual</option>
+            <option value="TP">TP — take-profit tersentuh</option>
+            <option value="SL">SL — stop-loss / trailing tersentuh</option>
+          </select>
+        </label>
+        <div class="grid grid-cols-2 gap-3">
+          <button id="close-cancel" class="btn-analyze w-full" style="border-color: rgba(138,148,168,.4); color: var(--muted);">Batal</button>
+          <button id="close-confirm" class="btn-analyze w-full" style="border-color: rgba(245,158,11,.5); color: var(--amber);">
+            <i class="fa-solid fa-flag-checkered"></i> Tutup &amp; Catat PnL
+          </button>
+        </div>
       </div>
     </div>
   </div>

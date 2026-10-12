@@ -2,6 +2,9 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from typing import Optional
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +17,7 @@ from app.services.crypto_service import (
     get_coin_list,
     get_binance_live_prices,
     get_binance_24h_changes,
+    get_binance_klines,
     resolve_coin_id
 )
 
@@ -26,6 +30,8 @@ from app.services.recommendation_service import (
 from app.services.news_service import get_crypto_news
 from app.services.sentiment_service import analyze_news_sentiment, calculate_sentiment_score
 from app.services.sentiment_history_service import get_fng_history
+from app.services.backtest_service import build_technical_rows, signals_v1
+from app.services.backtest_engine import simulate, compute_metrics
 from app.services.telegram_service import (
     is_configured as tg_configured,
     send_telegram_alert,
@@ -33,6 +39,39 @@ from app.services.telegram_service import (
     alert_scheduler_loop,
 )
 from app.services import portfolio_service
+from app.services import price_alert_service
+
+
+async def _check_price_alerts(items: list) -> list:
+    """Evaluasi aturan alert harga custom memakai harga live `items`.
+
+    Dipanggil dari endpoint watchlist/live-prices (UI poll tiap 5 detik)
+    sehingga reaksi berlangsung dalam hitungan detik tanpa timer baru.
+    Saat tersentuh: aturan dinonaktifkan (sekali tembak) + kirim Telegram
+    (graceful bila belum dikonfigurasi). Return daftar terpicu utk UI.
+    """
+    prices = {}
+    for c in items:
+        if c.get("error") or c.get("price") is None:
+            continue
+        try:
+            prices[c["coin_id"]] = float(c["price"])
+        except (TypeError, ValueError):
+            continue
+    if not prices:
+        return []
+
+    triggered = price_alert_service.evaluate_alerts(prices)
+    for a in triggered:
+        arrow = "≥" if a["direction"] == "ABOVE" else "≤"
+        # send_telegram_alert graceful — tanpa token cukup return False.
+        await send_telegram_alert(
+            "🚨 <b>Recy Price Alert</b>\n"
+            f"{a['coin_id'].upper()} menyentuh batas {arrow} "
+            f"${a['target_price']:,.2f}\n"
+            f"Harga live: ${a['trigger_price']:,.2f}"
+        )
+    return triggered
 
 
 async def _alert_scan() -> tuple:
@@ -177,6 +216,8 @@ async def _watchlist_item(
             "price": execution["current_price"],
             "price_source": price_source,
             "trend": technical_score["condition"],  # BULLISH/NEUTRAL/BEARISH
+            # ADX utk filter scanner "Trending" di UI (tanpa panggilan API baru).
+            "adx_14": technical_score.get("adx_14"),
             "recommendation": recommendation["recommendation"],  # BUY/HOLD/SELL
             "sl_price": execution["stop_loss_price"],
             "tp_price": execution["take_profit_price"],
@@ -238,9 +279,13 @@ async def crypto_dashboard_watchlist(coins: str = None):
             )
         )
 
+    # Evaluasi alert harga custom (Phase 9) — reaksi detik, notif UI + TG.
+    triggered_alerts = await _check_price_alerts(items)
+
     return {
         "count": len(items),
         "binance_live": bool(live),
+        "alerts_triggered": triggered_alerts,
         "coins": list(items),
     }
 
@@ -272,9 +317,13 @@ async def crypto_live_prices(coins: str = None):
             )
         )
 
+    # Evaluasi alert harga custom (Phase 9) — reaksi detik, notif UI + TG.
+    triggered_alerts = await _check_price_alerts(items)
+
     return {
         "count": len(items),
         "binance_live": bool(live),
+        "alerts_triggered": triggered_alerts,
         "coins": list(items),
     }
 
@@ -286,6 +335,27 @@ async def crypto_detail(coin_id: str):
 async def crypto_history(coin_id: str, days: int = 90):
     """Riwayat harga — `days` mendukung timeframe dashboard (7/30/90/365)."""
     return await get_coin_history(coin_id, days=days)
+
+
+@app.get("/api/crypto/{coin_id}/klines")
+async def crypto_klines(coin_id: str, interval: str = "1h", limit: int = 200):
+    """Candle OHLCV Binance (15m/30m/1h/4h/1d) — chart candlestick live.
+
+    Publik, tanpa API key. 404 bila koin tanpa pasangan USDT atau
+    interval di luar whitelist (frontend fallback ke riwayat CoinGecko).
+    """
+    payload = await get_binance_klines(
+        coin_id, interval=interval, limit=limit
+    )
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Klines '{coin_id}' interval '{interval}' tidak tersedia "
+                "(koin tanpa pasangan Binance / interval tidak valid)."
+            ),
+        )
+    return payload
 
 @app.get("/api/crypto/{coin_id}/technical")
 async def crypto_technical(coin_id: str, days: int = 365):
@@ -490,6 +560,97 @@ async def market_fng():
     return payload
 
 
+# ============ Phase 9: Backtest On-Demand (Uji Strategi) ============
+_bt_cache = TTLCache()
+BT_TTL = 10 * 60  # sinyal teknikal berubah pelan -> cache 10 menit.
+
+
+def _utc_date_ms(timestamp_ms) -> str:
+    return datetime.fromtimestamp(
+        timestamp_ms / 1000, tz=timezone.utc
+    ).date().isoformat()
+
+
+async def _backtest_report(coin_id: str, days: int = 365) -> dict:
+    """Backtest cepat sinyal teknikal V1 (threshold baseline 70/30)
+    + ATR SL 1.5x + ATR Trailing Stop — memakai mesin backtest yang
+    sama dengan 29 unit test & walk-forward (tanpa lookahead).
+
+    Fee 0.1% per sisi (taker Binance). History CoinGecko cache 5 menit
+    sehingga aman dipanggil berulang dari UI.
+    """
+    days = max(90, min(int(days), 730))
+    key = ("bt", coin_id, days)
+    cached, hit = _bt_cache.get(key)
+    if hit:
+        return cached
+
+    history = await get_coin_history(coin_id, days=days)
+    rows = build_technical_rows(
+        history["prices"], history.get("total_volumes") or []
+    )
+    signals = signals_v1(rows)  # BUY >= 70 / SELL < 30 (baseline)
+
+    start_index = next(
+        (
+            i for i, s in enumerate(signals)
+            if s and s.get("signal") is not None
+        ),
+        None,
+    )
+    if start_index is None:
+        raise ValueError(
+            "Tidak ada sinyal pada rentang ini — coba rentang lebih panjang."
+        )
+
+    prices = [s["price"] for s in signals]
+    atr = [s.get("atr") for s in signals]
+
+    sim = simulate(
+        prices,
+        signals,
+        fee_rate=0.001,
+        atr=atr,
+        use_atr_stop_loss=True,
+        atr_multiplier=1.5,   # sama dengan SL_ATR_MULT plan dashboard
+        use_trailing_stop=True,
+    )
+    metrics = compute_metrics(
+        prices, signals, sim, start_index=start_index
+    )
+
+    report = {
+        "coin_id": coin_id,
+        "days": days,
+        "start_date": _utc_date_ms(rows[start_index]["timestamp"]),
+        "end_date": _utc_date_ms(rows[-1]["timestamp"]),
+        "strategy": (
+            "V1 teknikal (BUY≥70 / SELL<30) + ATR SL 1.5× "
+            "+ ATR Trailing Stop"
+        ),
+        "fee_pct_per_side": 0.1,
+        "metrics": metrics,
+    }
+    _bt_cache.set(key, report, BT_TTL)
+    return report
+
+
+@app.get("/api/backtest/{coin_id}")
+async def backtest_coin(coin_id: str, days: int = 365):
+    """Uji strategi satu koin: win rate, return vs buy&hold, max DD,
+    Sharpe, jumlah trade & exit SL/TP/trailing."""
+    resolved = await resolve_coin_id(coin_id)
+    if resolved is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Coin '{coin_id}' tidak ditemukan di CoinGecko.",
+        )
+    try:
+        return await _backtest_report(resolved, days)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 # ============ Alerts: Telegram (opsional via .env) ============
 
 @app.post("/api/alerts/telegram/test")
@@ -533,6 +694,74 @@ async def telegram_scan(coins: str = None):
     }
 
 
+# ============ Phase 9: Alert Harga Custom (Price Alerts) ============
+
+
+class PriceAlertIn(BaseModel):
+    coin_id: str = Field(min_length=1, examples=["bitcoin"])
+    direction: str = Field(default="ABOVE", examples=["ABOVE"])
+    target_price: float = Field(gt=0, examples=[90000.0])
+
+
+@app.get("/api/alerts/price")
+async def price_alert_list():
+    """Daftar aturan alert harga (aktif + riwayat terpicu terbaru)."""
+    return price_alert_service.list_alerts()
+
+
+@app.post("/api/alerts/price", status_code=201)
+async def price_alert_add(payload: PriceAlertIn):
+    """Tambah aturan: beritahu saat harga live menyentuh target.
+
+    Evaluasi berjalan otomatis di endpoint live-prices (poll 5 detik);
+    sekali tembak — aturan nonaktif setelah terpicu.
+    """
+    resolved = await resolve_coin_id(payload.coin_id)
+    if resolved is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Coin '{payload.coin_id}' tidak ditemukan di CoinGecko.",
+        )
+    try:
+        alert = price_alert_service.add_alert(
+            resolved, payload.direction, payload.target_price
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"created": True, "alert": alert}
+
+
+@app.delete("/api/alerts/price/{alert_id}")
+async def price_alert_delete(alert_id: str):
+    """Hapus satu aturan alert (aktif maupun sudah terpicu)."""
+    removed = price_alert_service.delete_alert(alert_id)
+    if removed is None:
+        raise HTTPException(status_code=404, detail="Alert tidak ditemukan.")
+    return {"deleted": True, "alert": removed}
+
+
+@app.get("/api/alerts/price/check")
+async def price_alert_check(coins: str = None):
+    """Cek alert memakai harga live Binance — RINGAN (batch cache 5 dtk).
+
+    Dipoll UI tiap 10 detik secara independen sehingga aturan tetap
+    bereaksi detik walau WebSocket menahan polling harga. Koin pada
+    aturan aktif di luar watchlist ikut diperiksa.
+    """
+    coin_ids = await _resolve_coin_ids(_requested_coins(coins))
+    for a in price_alert_service.list_alerts()["active"]:
+        if a["coin_id"] not in coin_ids:
+            coin_ids.append(a["coin_id"])
+
+    live = await get_binance_live_prices(coin_ids)
+    items = [
+        {"coin_id": cid, "price": live.get(cid)}
+        for cid in coin_ids
+    ]
+    triggered = await _check_price_alerts(items)
+    return {"count": len(triggered), "alerts_triggered": triggered}
+
+
 # ============ Portofolio: Jurnal Posisi Pribadi ============
 
 
@@ -569,11 +798,46 @@ async def portfolio_list_positions():
 
 @app.delete("/api/portfolio/positions/{position_id}")
 async def portfolio_delete_position(position_id: str):
-    """Tutup/hapus satu posisi."""
+    """Hapus satu posisi aktif tanpa mencatat realized PnL."""
     removed = portfolio_service.delete_position(position_id)
     if removed is None:
         raise HTTPException(status_code=404, detail="Posisi tidak ditemukan.")
     return {"deleted": True, "position": removed}
+
+
+# ============ Phase 8: Closed Trades Tracker (Jurnal Trade Selesai) ============
+
+
+class PositionCloseIn(BaseModel):
+    # None -> harga live Binance (fallback CoinGecko) saat posisi ditutup.
+    exit_price: Optional[float] = Field(default=None, gt=0, examples=[85000.0])
+    exit_reason: str = Field(default="MANUAL", examples=["TP"])
+
+
+@app.post("/api/portfolio/positions/{position_id}/close")
+async def portfolio_close_position(
+    position_id: str,
+    payload: Optional[PositionCloseIn] = None,
+):
+    """Tutup posisi -> pindah ke jurnal trade selesai (realized PnL)."""
+    body = payload or PositionCloseIn()
+    try:
+        closed = await portfolio_service.close_position(
+            position_id,
+            exit_price=body.exit_price,
+            exit_reason=body.exit_reason,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"closed": True, "trade": closed}
+
+
+@app.get("/api/portfolio/summary")
+async def portfolio_summary():
+    """Metrik trade tertutup: realized PnL, win rate, jumlah trade + riwayat."""
+    return await portfolio_service.closed_summary()
 
 
 # ============ Dashboard (Crypto Terminal Edition) ============
