@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Recy — Crypto Intelligence Terminal</title>
+  <link rel="icon" type="image/png" href="/static/img/recy-logo.jfif" />
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -33,10 +34,13 @@
 
   <!-- Font Awesome (icons) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-  <!-- TradingView Lightweight Charts -->
+  <!-- TradingView Lightweight Charts (chart mini equity curve) -->
   <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <!-- TradingView Advanced Real-Time Chart Widget (chart utama) -->
+  <script src="https://s3.tradingview.com/tv.js"></script>
 
-  <link rel="stylesheet" href="/static/css/style.css" />
+  <!-- ?v= memaksa browser memuat aset terbaru setiap index.html berubah (anti-cache) -->
+  <link rel="stylesheet" href="/static/css/style.css?v=20261016c" />
 </head>
 
 <body>
@@ -44,9 +48,7 @@
   <header class="topbar border-b border-edge/70 bg-obsidian/80 backdrop-blur-md">
     <div class="mx-auto flex max-w-[1680px] items-center justify-between px-4 py-2.5">
       <div class="flex items-center gap-3">
-        <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-bull/10 text-bull text-base border border-bull/30">
-          <i class="fa-solid fa-chart-line"></i>
-        </div>
+        <img src="/static/img/recy-logo.jfif" alt="Recy" class="h-9 w-9 rounded-xl border border-bull/30 object-cover logo-glow" />
         <div>
           <h1 class="font-display text-base font-extrabold tracking-wide leading-tight">
             RECY <span class="text-cyan">Crypto Intelligence Terminal</span>
@@ -135,6 +137,16 @@
             </select>
             <span id="wl-filter-count" class="wl-filter-count"></span>
           </div>
+          <!-- Filter Timeframe Sinyal + Trading Style (Phase 11) -->
+          <div class="wl-filters signal-filters" role="group" aria-label="Filter sinyal: timeframe & gaya trading">
+            <span class="wl-filters-lbl">TF Sinyal</span>
+            <button class="chip" data-sigt="1h" title="Intraday — indikator & sinyal dihitung dari candle 1 jam (responsif)">⏱ Intraday</button>
+            <button class="chip active" data-sigt="1D" title="Makro — indikator & sinyal dihitung dari candle harian">📈 Makro</button>
+            <span class="wl-filters-sep"></span>
+            <span class="wl-filters-lbl">Gaya</span>
+            <button class="chip" data-mode="scalp" title="Scalping / Day Trading — responsif: BUY ≥ 60, SELL &lt; 40, filter EMA-20/EMA-50 timeframe aktif">⚡ Scalp / Day</button>
+            <button class="chip active" data-mode="swing" title="Swing Trading (standar): BUY ≥ 68, SELL &lt; 32, filter SMA + relaksasi breakout">📐 Swing</button>
+          </div>
           <div class="wl-scroll">
             <table class="wl-table wl-compact">
               <thead>
@@ -159,9 +171,14 @@
           <div class="wl-scroll">
             <div class="flex items-center justify-between gap-2 px-4 pt-3">
               <div class="text-[11px] text-muted">Jurnal pribadi • PnL mengambang live, status SL &amp; trailing</div>
-              <button id="btn-add-position" class="btn-analyze whitespace-nowrap">
-                <i class="fa-solid fa-plus"></i> Catat Posisi
-              </button>
+              <div class="flex items-center gap-1.5">
+                <span id="btn-backup" class="pf-act" title="Backup jurnal (unduh JSON: posisi, riwayat, alert)"><i class="fa-solid fa-download"></i></span>
+                <span id="btn-restore" class="pf-act" title="Restore jurnal dari file backup (merge)"><i class="fa-solid fa-upload"></i></span>
+                <input id="restore-file" type="file" accept="application/json,.json" class="hidden" />
+                <button id="btn-add-position" class="btn-analyze whitespace-nowrap">
+                  <i class="fa-solid fa-plus"></i> Catat Posisi
+                </button>
+              </div>
             </div>
 
             <!-- Sub-tab: Posisi Aktif <-> Riwayat Trade Selesai -->
@@ -288,21 +305,27 @@
         <div id="detail" class="hidden right-body">
           <!-- Chart TradingView + timeframe -->
           <div class="glass chart-card">
-            <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+            <div class="chart-head">
               <div class="flex items-center gap-1.5">
                 <span class="mr-1 text-[10px] uppercase tracking-wider text-muted">Timeframe</span>
                 <button class="tf-btn" data-tf="15m">15m</button>
                 <button class="tf-btn" data-tf="1h">1h</button>
                 <button class="tf-btn" data-tf="4h">4h</button>
-                <button class="tf-btn" data-tf="1D">1D</button>
-                <button class="tf-btn" data-tf="7D">7D</button>
-                <button class="tf-btn" data-tf="30D">30D</button>
-                <button class="tf-btn active" data-tf="90D">90D</button>
-                <button class="tf-btn" data-tf="1Y">1Y</button>
+                <button class="tf-btn active" data-tf="1D">1D</button>
+                <button class="tf-btn" data-tf="1W">1W</button>
               </div>
-              <span class="text-[10.5px] text-muted">Candle Binance (15m–1D) • Area CoinGecko (7D–1Y) • garis SL/TP otomatis</span>
+              <!-- Level Recy: chip ringkas di LUAR area chart (tidak menutupi candle) -->
+              <div id="level-chips" class="level-chips" title="Level Recy — klik ikon lonceng untuk memasang alert harga di level tersebut"></div>
+              <div class="flex items-center gap-2">
+                <span id="tv-symbol-label" class="tv-symbol-label">—</span>
+                <button id="btn-chart-zoom" class="icon-btn" title="Perbesar chart (Esc untuk keluar)">
+                  <i class="fa-solid fa-expand"></i>
+                </button>
+              </div>
             </div>
-            <div id="chart" class="chart-canvas"></div>
+            <div id="chart" class="chart-canvas tv-wrap">
+              <div id="tv-chart"></div>
+            </div>
           </div>
 
           <!-- Dua kartu berdampingan -->
@@ -313,15 +336,35 @@
                 <h3 class="card-title">
                   <i class="fa-solid fa-bullseye mr-2 text-bull"></i>Execution Plan &amp; Position Calculator
                 </h3>
-                <button id="btn-backtest" class="btn-analyze whitespace-nowrap" title="Backtest sinyal teknikal 365 hari terakhir — mesin walk-forward yang sama dengan 29 unit test (tanpa lookahead)">
-                  <i class="fa-solid fa-flask"></i> Uji Strategi
-                </button>
+                <div class="flex items-center gap-1.5">
+                  <button id="btn-log-position" class="btn-analyze whitespace-nowrap" title="Catat posisi beli koin ini ke jurnal portofolio — harga & jumlah terisi otomatis dari kalkulator">
+                    <i class="fa-solid fa-bookmark"></i> Catat Posisi
+                  </button>
+                  <button id="btn-backtest" class="btn-analyze whitespace-nowrap" title="Backtest sinyal teknikal 365 hari terakhir — mesin walk-forward yang sama dengan 29 unit test (tanpa lookahead)">
+                    <i class="fa-solid fa-flask"></i> Uji Strategi
+                  </button>
+                </div>
               </div>
               <div class="scroll-area">
                 <div id="plan-banner" class="plan-banner plan-hold mb-3">
                   <i class="fa-solid fa-hourglass-half"></i><span>Memuat rencana…</span>
                 </div>
                 <div id="bt-panel" class="bt-panel hidden mb-3"></div>
+
+                <!-- Signal Strength Gauge — derajat keyakinan sinyal -->
+                <div id="sig-strength" class="sig-strength mb-3">
+                  <div class="mb-1 flex items-center justify-between gap-2">
+                    <span class="lbl"><i class="fa-solid fa-signal mr-1 text-cyan"></i>Signal Strength</span>
+                    <span id="sig-strength-label" class="badge badge-neutral">—</span>
+                  </div>
+                  <div class="sig-meter sig-meter-lg">
+                    <div id="sig-strength-fill" class="sig-fill"></div>
+                  </div>
+                  <div class="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted">
+                    <span id="sig-strength-meta">—</span>
+                    <span id="sig-strength-value" class="num font-bold text-cyan">—</span>
+                  </div>
+                </div>
 
                 <div class="mb-3 grid grid-cols-4 gap-2">
                   <div class="level-box level-sl">
@@ -491,8 +534,23 @@
           <button id="al-save" class="btn-analyze whitespace-nowrap"><i class="fa-solid fa-plus"></i> Tambah</button>
         </div>
         <div id="al-list" class="al-list"></div>
+        <div class="al-sep"><span>Alert Indikator — RSI / ADX</span></div>
+        <div class="al-form al-form-ind">
+          <input id="ali-coin" type="text" placeholder="koin (btc, solana…)" class="search-input" />
+          <select id="ali-ind" class="calc-input" title="Indikator">
+            <option value="RSI14">RSI 14</option>
+            <option value="ADX">ADX</option>
+          </select>
+          <select id="ali-dir" class="calc-input" title="Arah">
+            <option value="BELOW">≤ bawah</option>
+            <option value="ABOVE">≥ atas</option>
+          </select>
+          <input id="ali-target" type="number" min="0" step="any" placeholder="nilai" class="calc-input num" title="Nilai indikator" />
+          <button id="ali-save" class="btn-analyze whitespace-nowrap"><i class="fa-solid fa-plus"></i></button>
+        </div>
+        <div id="ali-list" class="al-list"></div>
         <div class="text-[10px] leading-snug text-muted">
-          Dievaluasi otomatis dari harga live Binance tiap ~5 detik — reaksi dalam hitungan detik. Sekali tembak; notifikasi desktop &amp; Telegram (bila dikonfigurasi).
+          Harga dievaluasi dari live Binance tiap ~10 detik; indikator dari history harian (cache 5 menit). Sekali tembak; notifikasi desktop &amp; Telegram (bila dikonfigurasi). Digest harian: pesan ringkasan tiap pagi (<span class="num">DIGEST_HOUR</span>, default 07:00).
         </div>
       </div>
     </div>
@@ -568,6 +626,6 @@
 
   <div id="toast" class="toast"></div>
 
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/app.js?v=20261016c"></script>
 </body>
 </html>

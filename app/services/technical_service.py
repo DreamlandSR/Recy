@@ -58,6 +58,7 @@ def calculate_sma_ema(prices: list, volumes: list = None):
     ----------
     sma_50 / sma_200 : SMA 50 & 200 hari (trend filter multi-timeframe).
         None sampai jendela terisi — baris TETAP dipertahankan.
+    ema_50 : EMA 50 — dipakai trend filter mode Scalping (bersama ema_20).
     volume_sma_20 / volume_ratio : SMA 20 volume dan volume/SMA20.
     price_change_pct : perubahan harga hari ini vs kemarin (konteks
         breakout untuk skor volume).
@@ -120,6 +121,14 @@ def calculate_sma_ema(prices: list, volumes: list = None):
         close=df["price"],
         window=200
     ).sma_indicator()
+
+    # EMA 50 — pasangan EMA-20/EMA-50 untuk trend filter mode Scalping
+    # (filter timeframe aktif, bukan SMA-200 harian). None sampai jendela
+    # terisi; baris tetap dipertahankan.
+    df["ema_50"] = EMAIndicator(
+        close=df["price"],
+        window=50
+    ).ema_indicator()
 
     # ===================== Tugas 2: volume =====================
     volume = _align_volumes(volumes, df)

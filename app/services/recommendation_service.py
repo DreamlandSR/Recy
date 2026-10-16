@@ -2,6 +2,8 @@
 # Parameter eksekusi riil (Personal Trading Edition — Tugas 1)
 # ============================================================================
 
+from app.services.scoring_service import mode_thresholds
+
 # Kelas aset untuk alokasi modal (% dari total portofolio).
 LARGE_CAP_COINS = {"bitcoin", "ethereum"}
 ALLOCATION_LARGE_CAP = "10-15%"   # BTC / ETH (blue chip)
@@ -174,34 +176,57 @@ def build_execution_plan(
     }
 
 
-def generate_recommendation(
+def signal_label(recommendation: str, technical_score: float,
+                 buy_threshold: float, sell_threshold: float) -> str:
+    """Label kekuatan sinyal utk Signal Strength Gauge (UI).
+
+    - "Strong BUY"  : skor jauh di atas ambang BUY (>= ambang + 8).
+    - "Weak BUY"    : baru saja menembus ambang.
+    - "Strong SELL" : skor jauh di bawah ambang SELL (<= ambang - 8).
+    - "Weak SELL"   : baru saja menembus ambang.
+    - "Near BUY" / "Near SELL" : HOLD yang sudah dekat ambang
+      (pengguna tahu seberapa cepat sinyal bisa berbalik).
+    - "Neutral HOLD": HOLD di zona netral.
+    """
+    score = float(technical_score)
+    if recommendation == "BUY":
+        return "Strong BUY" if score >= buy_threshold + 8 else "Weak BUY"
+    if recommendation == "SELL":
+        return "Strong SELL" if score <= sell_threshold - 8 else "Weak SELL"
+    if score >= buy_threshold - 6:
+        return "Near BUY"
+    if score < sell_threshold + 6:
+        return "Near SELL"
+    return "Neutral HOLD"
+
+
+def signal_from_score(
     technical_score: float,
     condition: str,
-    buy_threshold: float = 70,
-    sell_threshold: float = 30,
+    buy_threshold: float = None,
+    sell_threshold: float = None,
     trend_filter_ok: bool = True,
-    coin_id: str = None,
-    current_price: float = None,
-    atr_14: float = None,
-    price_source: str = "coingecko",
+    mode: str = None,
 ) -> dict:
-    """Threshold rekomendasi configurable (default 70/30 = baseline lama).
+    """Keputusan sinyal (BUY/HOLD/SELL) + kekuatan sinyal utk gauge.
 
-    - BUY  : technical_score >= buy_threshold
-    - SELL : technical_score <  sell_threshold
-    - HOLD : sisanya (alasan mengikuti `condition` dari technical score)
+    Threshold per trading style saat `mode` diberikan ("scalp" 60/40,
+    "swing" 68/32); tanpa mode & tanpa threshold eksplisit -> baseline
+    70/30 (perilaku lama — dipakai backtest).
 
-    Trend Filter Rules (Tugas 1):
-    - `trend_filter_ok=False` (harga di bawah SMA 50 atau SMA 200)
-      -> sinyal BUY diabaikan (diturunkan ke HOLD) agar tidak merekomendasikan
-      beli di pasar bearish. SELL/HOLD tidak terpengaruh.
-
-    Parameter eksekusi (Personal Trading Edition):
-    - Bila `current_price` diberikan, hasil menyertakan blok `execution`
-      (SL/TP dari ATR, trailing trigger, risk:reward, alokasi modal) via
-      `build_execution_plan`. `price_source` diteruskan ke blok execution
-      ("binance" bila harga live bursa dipakai, selain itu "coingecko").
+    Output tambahan:
+    - signal_strength : derajat keyakinan 0-100 (= skor teknikal).
+    - signal_label    : "Strong BUY" / "Weak BUY" / "Neutral HOLD" /
+      "Near BUY" / "Strong SELL" dst — menunjukkan seberapa dekat
+      koin dengan pembalikan arah sinyal.
+    - buy_threshold / sell_threshold / mode : ambang yang dipakai
+      (diteruskan ke UI agar gauge menampilkan ambang aktif).
     """
+    default_buy, default_sell = mode_thresholds(mode)
+    if buy_threshold is None:
+        buy_threshold = default_buy
+    if sell_threshold is None:
+        sell_threshold = default_sell
 
     if technical_score >= buy_threshold and not trend_filter_ok:
         recommendation = "HOLD"
@@ -252,18 +277,74 @@ def generate_recommendation(
             "Belum terdapat sinyal teknikal yang cukup kuat untuk BUY atau SELL."
         ]
 
-    result = {
+    return {
         "recommendation": recommendation,
         "confidence": round(confidence, 2),
-        "reason": reason
+        "reason": reason,
+        # Signal Strength Gauge (Phase 11): kekuatan keyakinan sinyal.
+        "signal_strength": round(float(technical_score), 2),
+        "signal_label": signal_label(
+            recommendation, technical_score, buy_threshold, sell_threshold
+        ),
+        "buy_threshold": buy_threshold,
+        "sell_threshold": sell_threshold,
+        "mode": mode,
     }
+
+
+def generate_recommendation(
+    technical_score: float,
+    condition: str,
+    buy_threshold: float = None,
+    sell_threshold: float = None,
+    trend_filter_ok: bool = True,
+    coin_id: str = None,
+    current_price: float = None,
+    atr_14: float = None,
+    price_source: str = "coingecko",
+    mode: str = None,
+) -> dict:
+    """Rekomendasi sinyal + blok eksekusi (SL/TP dari ATR).
+
+    - BUY  : technical_score >= buy_threshold
+    - SELL : technical_score <  sell_threshold
+    - HOLD : sisanya (alasan mengikuti `condition` dari technical score)
+
+    Threshold:
+    - `mode` ("scalp" 60/40 · "swing" 68/32) menentukan ambang saat
+      buy/sell threshold tidak diberikan eksplisit — lihat
+      `signal_from_score`. Tanpa mode & tanpa threshold -> baseline 70/30.
+
+    Trend Filter Rules (Tugas 1):
+    - `trend_filter_ok=False` (harga di bawah SMA 50 atau SMA 200)
+      -> sinyal BUY diabaikan (diturunkan ke HOLD) agar tidak merekomendasikan
+      beli di pasar bearish. SELL/HOLD tidak terpengaruh. (Catatan Phase 11:
+      di mode scalp/swing, `calculate_technical_score` sudah mengubah skor
+      dengan penalti bila momentum breakout kuat — sehingga filter di sini
+      hanya memblokir bila relaksasi tidak berlaku.)
+
+    Parameter eksekusi (Personal Trading Edition):
+    - Bila `current_price` diberikan, hasil menyertakan blok `execution`
+      (SL/TP dari ATR, trailing trigger, risk:reward, alokasi modal) via
+      `build_execution_plan`. `price_source` diteruskan ke blok execution
+      ("binance" bila harga live bursa dipakai, selain itu "coingecko").
+    """
+
+    result = signal_from_score(
+        technical_score,
+        condition,
+        buy_threshold=buy_threshold,
+        sell_threshold=sell_threshold,
+        trend_filter_ok=trend_filter_ok,
+        mode=mode,
+    )
 
     if current_price is not None:
         result["execution"] = build_execution_plan(
             coin_id=coin_id,
             current_price=current_price,
             atr_14=atr_14,
-            recommendation=recommendation,
+            recommendation=result["recommendation"],
             price_source=price_source,
         )
 

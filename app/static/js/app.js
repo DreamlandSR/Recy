@@ -1,18 +1,19 @@
 /* ==========================================================================
    Recy Crypto Intelligence Terminal — frontend (vanilla JS, zero build)
-   - Watchlist  : GET /api/crypto/dashboard/watchlist      (poll 45 dtk)
+   - Watchlist  : GET /api/crypto/dashboard/watchlist      (poll 30 dtk)
    - Live price : GET /api/crypto/live-prices              (poll 5 dtk — harga
      Binance real-time + SL/TP terhitung ulang dari harga live)
-   - Chart      : GET /api/crypto/{id}/history             (cache BE 5 mnt)
-   - Gauges     : GET /api/crypto/{id}/technical/score
+   - Chart      : TradingView Advanced Real-Time Chart Widget (tv.js),
+     symbol dinamis + chip level SL/TP Recy di header chart (di luar area chart)
+   - Gauges     : GET /api/crypto/{id}/technical/score     (cache BE 30 dtk)
    - Exec+News  : GET /api/crypto/{id}/analysis            (FinBERT)
    - Ticker FNG : GET /api/market/fng                      (cache BE 15 mnt)
    ========================================================================== */
 
 "use strict";
 
-const POLL_WATCHLIST_MS = 45_000;
-const POLL_DETAIL_MS = 60_000;      // history + technical (murah, di-cache)
+const POLL_WATCHLIST_MS = 30_000;    // selaras dgn cache BE 30 dtk
+const POLL_DETAIL_MS = 30_000;       // technical/score (murah, di-cache 30 dtk)
 const POLL_ANALYSIS_MS = 300_000;   // execution + news (FinBERT)
 const POLL_LIVE_MS = 5_000;         // fallback HTTP polling bila WebSocket offline
 const POLL_ALERTS_MS = 10_000;      // cek alert harga (ringan, cache BE 5 dtk)
@@ -65,45 +66,50 @@ let wsReconnectTimer = null;
 let wsUrlIdx = 0;
 let wsActive = false;
 
-/* Timeframe (Phase 9): 15m-1D memakai candle OHLCV Binance (klines,
-   update tick OHLC real-time); 7D-1Y area CoinGecko (jangka panjang). */
-const TF_CONFIG = {
-  "15m": { src: "binance", interval: "15m", limit: 180 },
-  "1h": { src: "binance", interval: "1h", limit: 240 },
-  "4h": { src: "binance", interval: "4h", limit: 210 },
-  "1D": { src: "binance", interval: "1d", limit: 180 },
-  "7D": { src: "coingecko", days: 7 },
-  "30D": { src: "coingecko", days: 30 },
-  "90D": { src: "coingecko", days: 90 },
-  "1Y": { src: "coingecko", days: 365 },
+/* Timeframe chart utama -> interval widget TradingView.
+   (Widget menarik data OHLC real-time dari server TradingView sendiri;
+   endpoint klines/history Recy tetap ada untuk backtest & alert indikator.) */
+const TF_TV_INTERVAL = {
+  "15m": "15",
+  "1h": "60",
+  "4h": "240",
+  "1D": "D",
+  "1W": "W",
 };
 const DEFAULT_COINS = ["bitcoin", "ethereum", "solana", "binancecoin", "ripple"];
 const LS_KEY = "recy.watchlist.coins";
 
+// Preferensi sinyal (dideklarasikan SEBELUM `state` — dipakai loadSignalPref).
+const SIGNAL_TFS = ["15m", "1h", "4h", "1D", "1W"];
+const SIGNAL_MODES = ["scalp", "swing"];
+const MODE_LABEL = { scalp: "Scalp / Day", swing: "Swing" };
+
 const state = {
   coins: [],            // watchlist rows
   selected: null,       // coin_id terpilih
-  chart: null,
-  series: {},
   timers: {},
   loadingDetail: false,
-  tf: "90D",            // timeframe chart aktif
+  tf: "1D",             // timeframe chart aktif (tombol header)
+  // Sinyal: timeframe (Intraday/Makro) + gaya trading — persisten di localStorage
+  sigTf: loadSignalPref("recy.signal.tf", "1D"),
+  sigMode: loadSignalPref("recy.signal.mode", "swing"),
   custom: loadCustomCoins(), // koin tambahan pengguna (localStorage)
   exec: null,           // blok execution terakhir (untuk kalkulator)
   pendingAdd: null,     // koin baru yang sedang divalidasi
+  pendingDetail: null,  // permintaan detail antrean (anti-drop saat loading)
   // Phase 8
-  lastBarTime: null,    // (legacy) waktu bar terakhir — lihat lastBar
   filter: "all",        // quick filter watchlist aktif
   prevRec: {},          // rekomendasi sebelumnya (deteksi transisi BUY)
   notifFired: {},       // status peringatan risiko terakhir (dedupe)
   // Phase 9
   sort: "default",      // urutan watchlist (chip sortir)
-  seriesType: null,     // "candles" | "area" — jenis series utama chart
-  lastBar: null,        // bar terakhir (OHLC utk candle / value utk area)
-  priceLines: {},       // ref garis SL/TP/trailing pada series aktif
+  calcQty: null,        // qty terakhir dari kalkulator (prefill Catat Posisi)
   lastClosed: [],       // riwayat trade tertutup terakhir (equity/CSV)
   equityChart: null,    // chart mini equity curve (tab Riwayat)
   equitySeries: null,
+  // Chart TradingView: widget hosted tanpa API setSymbol resmi ->
+  // rebuild hanya saat simbol/interval benar-benar berubah.
+  tv: { symbol: null, interval: null },
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -179,6 +185,58 @@ function saveCustomCoins() {
   localStorage.setItem(LS_KEY, JSON.stringify(state.custom));
 }
 
+/* --------- Preferensi sinyal: timeframe + trading style (persisten) --------- */
+function loadSignalPref(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    if (key === "recy.signal.tf") return SIGNAL_TFS.includes(v) ? v : fallback;
+    if (key === "recy.signal.mode") return SIGNAL_MODES.includes(v) ? v : fallback;
+    return v || fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function saveSignalPrefs() {
+  try {
+    localStorage.setItem("recy.signal.tf", state.sigTf);
+    localStorage.setItem("recy.signal.mode", state.sigMode);
+  } catch (_) {}
+}
+
+function signalParams() {
+  return `tf=${encodeURIComponent(state.sigTf)}&mode=${encodeURIComponent(state.sigMode)}`;
+}
+
+/* Normalisasi koin kustom hasil versi lama: entri berbentuk query/simbol
+   (mis. "xmr" / "Dogecoin") diganti coin_id final ("monero" / "dogecoin")
+   lewat /api/coins/resolve — mencegah entri hantu ganda yang tidak bisa
+   dihapus dengan benar. Koin TIDAK pernah dihapus di sini; entri yang
+   gagal resolve tetap disimpan (persistensi) dan bisa dihapus via tombol x. */
+async function normalizeCustomCoins() {
+  const ids = new Set(state.coins.map((c) => c.coin_id));
+  const fixes = [];
+  for (const q of state.custom) {
+    if (ids.has(q) || DEFAULT_COINS.includes(q)) continue;
+    try {
+      const r = await api(`/api/coins/resolve?q=${encodeURIComponent(q)}`);
+      if (r.coin_id && r.coin_id !== q) fixes.push([q, r.coin_id]);
+    } catch (_) {
+      // tidak bisa resolve (offline/404) — biarkan, tampil sbg baris offline
+    }
+  }
+  if (!fixes.length) return;
+
+  let custom = [...state.custom];
+  for (const [from, to] of fixes) {
+    custom = custom.filter((x) => x !== from);
+    if (!custom.includes(to) && !DEFAULT_COINS.includes(to)) custom.push(to);
+  }
+  state.custom = custom;
+  saveCustomCoins();
+  await loadWatchlist();
+}
+
 function watchParams() {
   const all = [...DEFAULT_COINS];
   for (const c of state.custom) if (!all.includes(c)) all.push(c);
@@ -212,31 +270,49 @@ async function loadFng() {
 
 /* ---------------- 2. Watchlist ---------------- */
 
+let watchlistReqSeq = 0; // penanda respons paling baru (anti-race polling)
+
 async function loadWatchlist() {
+  const seq = ++watchlistReqSeq;
   try {
     const q = watchParams();
-    const data = await api(`/api/crypto/dashboard/watchlist?coins=${encodeURIComponent(q)}`);
+    const data = await api(
+      `/api/crypto/dashboard/watchlist?coins=${encodeURIComponent(q)}&${signalParams()}`
+    );
+    // Respons basi: permintaan lebih baru sudah diluncurkan (mis. pengguna
+    // baru saja menambah koin) — jangan timpa state / validasi dgn data lama.
+    if (seq !== watchlistReqSeq) return;
     state.coins = data.coins || [];
 
-    // Validasi koin baru: bila coin_id tidak dikenal CoinGecko (ada field
-    // error), keluarkan dari daftar kustom dan beri tahu pengguna.
+    // Validasi koin BARU yang baru ditambahkan pengguna: hanya dikeluarkan
+    // bila coin_id memang tidak dikenal CoinGecko (not_found — typo/ salah
+    // ketik). Error sementara (429/timeout/offline) TIDAK menghapus koin:
+    // baris tetap tampil "Data Terbatas / Offline" + tombol retry.
+    // Koin kustom lama hanya bisa dihapus via tombol "x" (wl-remove).
     if (state.pendingAdd) {
+      const requested = q.split(",").includes(state.pendingAdd);
+      if (!requested) {
+        // Respons ini dikirim SEBELUM koin masuk daftar (race polling) —
+        // biarkan permintaan berikutnya yang memvalidasi.
+        state.pendingAdd = null;
+        await loadWatchlist();
+        return;
+      }
       const added = state.coins.find((c) => c.coin_id === state.pendingAdd);
-      if (!added || added.error) {
+      if (!added || added.not_found) {
         state.custom = state.custom.filter((x) => x !== state.pendingAdd);
         saveCustomCoins();
         toast(`Koin "${state.pendingAdd}" tidak ditemukan di CoinGecko.`, "err");
+      } else if (added.error) {
+        toast(`${added.name} ditambahkan — data sementara terbatas (offline), coba lagi nanti.`, "ok");
       } else {
         toast(`${added.name} (${(added.symbol || "").toUpperCase()}) ditambahkan ke watchlist.`);
       }
       state.pendingAdd = null;
     }
-    // Self-healing: buang koin kustom yang tidak valid dari penyimpanan.
-    const errored = new Set(state.coins.filter((c) => c.error).map((c) => c.coin_id));
-    state.custom = state.coins
-      .map((c) => c.coin_id)
-      .filter((id) => !DEFAULT_COINS.includes(id) && !errored.has(id));
-    saveCustomCoins();
+    // CATATAN: tidak ada logika "self-healing" yang menghapus state.custom.
+    // Koin kustom persisten di localStorage — hanya tombol hapus (x) yang
+    // mengeluarkannya dari watchlist.
 
     // (Phase 8) Deteksi transisi sinyal -> BUY utk notifikasi desktop.
     state.coins.forEach(checkBuySignal);
@@ -255,11 +331,12 @@ async function loadWatchlist() {
       if (first) selectCoin(first.coin_id);
     }
   } catch (err) {
-    $("#watchlist-body").innerHTML =
-      `<tr><td colspan="6" class="p-6 text-center text-bear">
-         <i class="fa-solid fa-circle-exclamation mr-2"></i>Gagal memuat watchlist: ${esc(err.message)}
-       </td></tr>`;
-    console.error("watchlist:", err);
+    // Gagal total (jaringan/API down): pertahankan baris yang ada + toast —
+    // mengosongkan tabel akan membuat koin terlihat "hilang" saat polling.
+    if (seq === watchlistReqSeq) {
+      toast(`Gagal memuat watchlist: ${err.message}`, "err");
+      console.error("watchlist:", err);
+    }
   }
 }
 
@@ -296,11 +373,49 @@ function sortWatchlistRows(rows) {
   return out;
 }
 
+/* Sel harga baris watchlist. Koin error/offline TIDAK dihapus — tampil
+   "Data Terbatas / Offline" + tombol retry (koin tetap di localStorage). */
+function priceCellHTML(c) {
+  const priceHtml = c.price != null ? `$${fmtPrice(c.price)}` : "$—";
+  if (!c.error) return priceHtml;
+  return `
+    <div>${priceHtml}</div>
+    <div class="wl-offline" title="${esc(c.error)}">
+      <span><i class="fa-solid fa-plug-circle-xmark"></i> Data Terbatas / Offline</span>
+      <button class="wl-retry" data-retry="${esc(c.coin_id)}" title="Coba muat ulang data koin ini">
+        <i class="fa-solid fa-rotate-right"></i>
+      </button>
+    </div>`;
+}
+
+/* Sel sinyal: badge + Signal Strength Gauge mini (kekuatan keyakinan). */
+function signalCellHTML(c) {
+  const badge = REC_BADGE[c.recommendation] ||
+    `<span class="badge badge-neutral">${esc(c.recommendation || "—")}</span>`;
+  const sig = c.signal;
+  if (!sig || c.error) return badge;
+
+  const rec = sig.recommendation || c.recommendation || "HOLD";
+  const strength = Number.isFinite(Number(sig.strength)) ? Number(sig.strength) : 50;
+  const pct = Math.max(0, Math.min(100, strength));
+  const color = rec === "BUY" ? "var(--bull)" : rec === "SELL" ? "var(--bear)" : "var(--amber)";
+  const label = `${sig.label || rec} (${pct.toFixed(0)}%)`;
+  return `
+    ${badge}
+    <div class="sig-meter" title="${esc(label)} — ambang ${esc(sig.mode || "baseline")}: BUY ≥ ${Number(sig.buy_threshold).toFixed(0)} · SELL < ${Number(sig.sell_threshold).toFixed(0)}">
+      <div class="sig-fill" style="width:${pct}%;background:${color}"></div>
+    </div>
+    <div class="sig-lbl">${esc(label)}</div>`;
+}
+
 function renderWatchlist() {
   const body = $("#watchlist-body");
   const rows = sortWatchlistRows(state.coins.filter(watchFilterMatch));
   const countEl = $("#wl-filter-count");
-  if (countEl) countEl.textContent = `${rows.length}/${state.coins.length} koin`;
+  if (countEl) {
+    countEl.textContent =
+      `${rows.length}/${state.coins.length} koin · sinyal ${state.sigTf} · ${MODE_LABEL[state.sigMode] || state.sigMode}`;
+  }
 
   if (!state.coins.length) {
     body.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-muted">Tidak ada data koin.</td></tr>`;
@@ -324,8 +439,8 @@ function renderWatchlist() {
             </div>
           </div>
         </td>
-        <td class="num text-right font-semibold cell-price">$${fmtPrice(c.price)}${c.error ? `<div class="text-[9.5px] text-bear">error</div>` : ""}</td>
-        <td class="cell-signal">${REC_BADGE[c.recommendation] || `<span class="badge badge-neutral">${esc(c.recommendation || "—")}</span>`}</td>
+        <td class="num text-right font-semibold cell-price">${priceCellHTML(c)}</td>
+        <td class="cell-signal">${signalCellHTML(c)}</td>
         <td class="num text-right text-bear cell-sl">$${fmtPrice(c.sl_price)}</td>
         <td class="num text-right text-bull cell-tp">$${fmtPrice(c.tp_price)}</td>
         <td class="text-center">${state.custom.includes(c.coin_id)
@@ -336,6 +451,15 @@ function renderWatchlist() {
 
   body.querySelectorAll(".wl-row").forEach((row) =>
     row.addEventListener("click", () => selectCoin(row.dataset.coin))
+  );
+  // Retry baris offline: paksa refresh watchlist sekarang (tanpa hapus koin).
+  body.querySelectorAll("[data-retry]").forEach((el) =>
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      el.classList.add("spin");
+      toast(`Mencoba ulang data ${el.dataset.retry}…`);
+      loadWatchlist();
+    })
   );
   body.querySelectorAll("[data-remove]").forEach((el) =>
     el.addEventListener("click", (ev) => {
@@ -353,75 +477,111 @@ function renderWatchlist() {
   );
 }
 
-/* ---------------- 3. Detail: chart + gauges ---------------- */
+/* ---------------- 3. Detail: chart TradingView + gauges ---------------- */
 
-function ensureChart() {
-  if (state.chart) return;
-  const el = $("#chart");
-  state.chart = LightweightCharts.createChart(el, {
-    width: el.clientWidth,
-    height: el.clientHeight || 340,
-    layout: {
-      background: { type: "solid", color: "#121824" },
-      textColor: "#8A94A8",
-      fontFamily: "Inter, sans-serif",
-    },
-    grid: {
-      vertLines: { color: "rgba(38,50,74,0.35)" },
-      horzLines: { color: "rgba(38,50,74,0.35)" },
-    },
-    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    rightPriceScale: { borderColor: "#26324A" },
-    timeScale: { borderColor: "#26324A", timeVisible: false },
-  });
+/* Simbol TradingView untuk koin: BINANCE:BTCUSDT, BINANCE:STRKUSDT, dst.
+   Pakai peta BINANCE_SYMBOLS; fallback SIMBOL+USDT dari data watchlist.
+   TV_SYMBOL_OVERRIDES: koin yang TIDAK punya pasangan USDT di Binance
+   (mis. Monero delisted) -> bursa lain yang tercatat di TradingView. */
+const TV_SYMBOL_OVERRIDES = {
+  monero: "KUCOIN:XMRUSDT",
+};
 
-  // Series UTAMA dibuat sesuai kebutuhan lewat setMainSeries(type):
-  // candlestick (Binance klines) atau area (CoinGecko daily).
-
-  state.series.vol = state.chart.addHistogramSeries({
-    priceScaleId: "vol",
-    priceFormat: { type: "volume" },
-    color: "rgba(138,148,168,0.35)",
-  });
-  state.chart.priceScale("vol").applyOptions({
-    scaleMargins: { top: 0.82, bottom: 0 },
-  });
-
-  new ResizeObserver(() => {
-    state.chart.applyOptions({ width: el.clientWidth, height: el.clientHeight || 340 });
-  }).observe(el);
+function tvSymbolFor(coinId, row) {
+  if (TV_SYMBOL_OVERRIDES[coinId]) return TV_SYMBOL_OVERRIDES[coinId];
+  const pair =
+    BINANCE_SYMBOLS[coinId] ||
+    (row?.symbol ? `${String(row.symbol).toUpperCase()}USDT` : null);
+  return pair ? `BINANCE:${pair}` : null;
 }
 
-function renderChart(history) {
-  const series = setMainSeries("area");
-  const prices = history.prices || [];
-  const volumes = history.total_volumes || [];
-  const volMap = new Map(volumes.map(([ts, v]) => [ts, v]));
+/* Widget hosted tv.js TIDAK punya API setSymbol resmi (riset dokumentasi
+   TradingView) -> cara dinamis yang didukung: bangun ulang widget dengan
+   opsi symbol/interval baru. Kami hanya rebuild saat simbol/interval
+   berubah supaya polling 30 detik tidak mereset chart yang sedang dilihat. */
+function mountTradingView(coinId) {
+  const container = $("#tv-chart");
+  const row = state.coins.find((c) => c.coin_id === coinId);
+  const symbol = tvSymbolFor(coinId, row);
+  const interval = TF_TV_INTERVAL[state.tf] || "D";
+  const label = $("#tv-symbol-label");
 
-  const priceData = prices.map(([ts, p]) => ({ time: Math.floor(ts / 1000), value: p }));
-  const volData = prices.map(([ts, p]) => {
-    const v = volMap.get(ts);
-    return {
-      time: Math.floor(ts / 1000),
-      value: v ?? 0,
-      color: "rgba(138,148,168,0.25)",
-    };
-  });
+  // Label simbol SELALU ikut pilihan terbaru — bahkan ketika widget
+  // TradingView belum termuat (jaringan ke tradingview.com lambat/
+  // terblokir), pengguna tetap tahu simbol & timeframe yang diminta.
+  if (label) {
+    label.textContent = symbol ? `${symbol} · ${state.tf}` : "chart tidak tersedia";
+  }
 
-  series.setData(priceData);
-  state.series.vol.setData(volData);
-  state.chart.timeScale().fitContent();
+  if (!container) return;
+  if (typeof TradingView === "undefined") {
+    // tv.js belum termuat — beri pesan ramah; mount ulang otomatis pada
+    // polling berikutnya (30 detik) atau saat timeframe/koin berganti.
+    container.innerHTML =
+      '<div class="tv-fallback"><i class="fa-solid fa-circle-notch fa-spin"></i> Widget TradingView belum termuat (jaringan ke tradingview.com lambat/terblokir) — indikator, sinyal & level Recy tetap diperbarui.</div>';
+    state.tv = { symbol: null, interval };
+    return;
+  }
 
-  // Bar terakhir — titik ujung grafik digerakkan real-time oleh tick
-  // Binance (live chart ticking, Phase 8/9).
-  const lastBar = priceData[priceData.length - 1];
-  state.lastBar = lastBar ? { time: lastBar.time, value: lastBar.value } : null;
-  state.lastBarTime = lastBar ? lastBar.time : null;
+  if (!symbol) {
+    // Koin tanpa pasangan USDT di Binance -> pesan ramah, jangan blank.
+    container.innerHTML =
+      '<div class="tv-fallback"><i class="fa-solid fa-circle-info"></i> Koin ini tidak memiliki pasangan USDT di Binance — chart TradingView tidak tersedia.</div>';
+    if (label) label.textContent = "chart tidak tersedia";
+    state.tv = { symbol: null, interval };
+    return;
+  }
+  if (label) label.textContent = `${symbol} · ${state.tf}`;
+  if (state.tv.symbol === symbol && state.tv.interval === interval) return; // sudah tampil
+
+  container.innerHTML = "";
+  try {
+    new TradingView.widget({
+      container_id: "tv-chart",
+      autosize: true,
+      symbol,
+      interval,
+      timezone: "Asia/Jakarta",
+      theme: "dark",
+      style: "1", // candlestick
+      locale: "en",
+      toolbar_bg: "#0d131f",
+      hide_top_toolbar: false, // header: timeframe + Indicators + pengaturan
+      hide_side_toolbar: false, // toolbar alat gambar di sebelah kiri
+      hide_legend: false, // baris OHLC (Open/High/Low/Close) di pojok kiri atas
+      allow_symbol_change: true,
+      save_image: false,
+      details: false,
+      hotlist: false,
+      calendar: false,
+      studies: [],
+      overrides: {
+        "paneProperties.background": "#0d131f",
+        "paneProperties.backgroundType": "solid",
+        "paneProperties.vertLines.color": "#1b2436",
+        "paneProperties.horzLines.color": "#1b2436",
+        "scalesProperties.textColor": "#8A94A8",
+        "mainSeriesProperties.candleStyle.upColor": "#00E599",
+        "mainSeriesProperties.candleStyle.downColor": "#FF3B69",
+        "mainSeriesProperties.candleStyle.borderUpColor": "#00E599",
+        "mainSeriesProperties.candleStyle.borderDownColor": "#FF3B69",
+        "mainSeriesProperties.candleStyle.wickUpColor": "rgba(0,229,153,0.6)",
+        "mainSeriesProperties.candleStyle.wickDownColor": "rgba(255,59,105,0.6)",
+        "mainSeriesProperties.candleStyle.barStyle": 0,
+      },
+    });
+    state.tv = { symbol, interval };
+  } catch (err) {
+    console.warn("TradingView widget:", err.message);
+  }
 }
 
-function renderGauges(score, latest, analysis) {
+function renderGauges(score, latest, analysis, signal) {
   const s = score || {};
   const overall = Number(s.technical_score ?? 0);
+
+  // Signal Strength Gauge (Phase 11) — derajat keyakinan sinyal.
+  renderSignalMeter(signal);
 
   const gauge = $("#g-overall");
   gauge.style.setProperty("--pct", overall.toFixed(0));
@@ -475,6 +635,44 @@ function renderGauges(score, latest, analysis) {
   }
 }
 
+/* Signal Strength Gauge / Sentiment Meter: seberapa kuat keyakinan sinyal
+   ("Strong BUY (82%)", "Weak BUY (63%)", "Neutral HOLD (51%)",
+   "Strong SELL (24%)") — menunjukkan seberapa dekat koin dengan
+   pembalikan arah sinyal + ambang mode trading yang sedang aktif. */
+function renderSignalMeter(signal) {
+  const labelEl = $("#sig-strength-label");
+  const fillEl = $("#sig-strength-fill");
+  const valEl = $("#sig-strength-value");
+  const metaEl = $("#sig-strength-meta");
+  if (!labelEl || !signal) return;
+
+  const rec = signal.recommendation || "HOLD";
+  // Dua bentuk signal: watchlist {label,strength} & score endpoint
+  // {signal_label,signal_strength} — dinormalisasi di sini.
+  const text = signal.label || signal.signal_label || rec;
+  const raw = Number(signal.strength ?? signal.signal_strength);
+  const pct = Math.max(0, Math.min(100, Number.isFinite(raw) ? raw : 50));
+  const cls = rec === "BUY" ? "badge-buy" : rec === "SELL" ? "badge-sell" : rec === "HOLD" ? "badge-hold" : "badge-neutral";
+  const color = rec === "BUY" ? "var(--bull)" : rec === "SELL" ? "var(--bear)" : "var(--amber)";
+
+  labelEl.className = `badge ${cls}`;
+  labelEl.textContent = `${text} (${pct.toFixed(0)}%)`;
+  if (valEl) valEl.textContent = `${pct.toFixed(0)}%`;
+  fillEl.style.width = `${pct}%`;
+  fillEl.style.background = color;
+  if (metaEl) {
+    const modeLabel =
+      MODE_LABEL[signal.mode] ||
+      signal.mode_label ||
+      (signal.mode ? String(signal.mode) : "Baseline 70/30");
+    const buy = Number(signal.buy_threshold);
+    const sell = Number(signal.sell_threshold);
+    metaEl.textContent =
+      `Ambang ${modeLabel}: BUY ≥ ${buy.toFixed(0)} · SELL < ${sell.toFixed(0)}` +
+      (signal.tf ? ` • timeframe ${signal.tf}` : "");
+  }
+}
+
 /* ---------------- 4. Execution card + news ---------------- */
 
 const PLAN = {
@@ -498,8 +696,13 @@ function renderExecution(analysis, watchRow) {
   state.exec = e; // untuk kalkulator posisi
   updateCalculator();
 
+  // Instan: meter dari baris watchlist saat skor belum sampai (renderGauges
+  // akan menimpanya dgn sinyal timeframe chart yang sedang aktif).
+  if (!analysis && watchRow?.signal) renderSignalMeter(watchRow.signal);
+
   if (!e) {
     $("#plan-banner").innerHTML = `<i class="fa-solid fa-circle-exclamation"></i><span>Data eksekusi tidak tersedia.</span>`;
+    updatePriceLines(); // kosongkan chip level agar tidak menampilkan data lama
     return;
   }
 
@@ -518,7 +721,7 @@ function renderExecution(analysis, watchRow) {
   $("#p-trailing").textContent = e.trailing_stop_trigger || "—";
   $("#p-note").textContent = e.note || "—";
 
-  updatePriceLines(); // garis SL/TP/trailing di chart (Phase 9)
+  updatePriceLines(); // chip level SL/TP/trailing di header chart (Phase 9)
 }
 
 function renderNews(analysis) {
@@ -594,6 +797,7 @@ function updateCalculator() {
   const reward = priceUsd > 0 && tp > 0 ? alloc * ((tp - priceUsd) / priceUsd) : 0;
 
   const dec = cur === "IDR" ? 0 : 2;
+  state.calcQty = qty; // prefill modal "Catat Posisi" dari kartu Execution
   const money = (v) =>
     (v < 0 ? "−" : "+") +
     sym + Math.abs(v).toLocaleString("id-ID", { maximumFractionDigits: dec });
@@ -609,10 +813,17 @@ function updateCalculator() {
 
 const PF_FIELDS = ["pf-coin", "pf-buy-price", "pf-amount", "pf-notes"];
 
-function openPfModal(prefillCoin = "") {
+function openPfModal(prefillCoin = "", prefillPrice = null, prefillAmount = null) {
   $("#pf-modal").classList.remove("hidden");
   if (prefillCoin) $("#pf-coin").value = prefillCoin;
-  $("#pf-coin").focus();
+  if (prefillPrice > 0) {
+    const p = Number(prefillPrice);
+    $("#pf-buy-price").value = Number(p.toFixed(p >= 1 ? 4 : 8));
+  }
+  if (prefillAmount > 0) {
+    $("#pf-amount").value = Number(Number(prefillAmount).toFixed(8));
+  }
+  ($("#pf-coin").value ? $("#pf-buy-price") : $("#pf-coin")).focus();
 }
 
 function closePfModal() {
@@ -763,123 +974,94 @@ async function loadPortfolio() {
   }
 }
 
-/* ============ Phase 9: Candle Chart, Uji Strategi, Alert, Equity ============ */
+/* ============ Phase 9/11: Chart TradingView, Uji Strategi, Alert, Equity ============ */
 
-/* --------- Jenis series chart: candlestick (klines) / area (CoinGecko) --------- */
-
-function setMainSeries(type) {
-  ensureChart();
-  if (state.seriesType === type && state.series.main) return state.series.main;
-  if (state.series.main) {
-    try { state.chart.removeSeries(state.series.main); } catch (_) {}
-  }
-  if (type === "candles") {
-    state.series.main = state.chart.addCandlestickSeries({
-      upColor: "#00E599",
-      downColor: "#FF3B69",
-      borderVisible: false,
-      wickUpColor: "rgba(0,229,153,0.6)",
-      wickDownColor: "rgba(255,59,105,0.6)",
-      priceFormat: { type: "price", precision: 2, minMove: 0.01 },
-    });
-  } else {
-    state.series.main = state.chart.addAreaSeries({
-      lineColor: "#00D8FF",
-      lineWidth: 2,
-      topColor: "rgba(0,216,255,0.35)",
-      bottomColor: "rgba(0,216,255,0.02)",
-      priceLineColor: "#00D8FF",
-      priceFormat: { type: "price", precision: 2, minMove: 0.01 },
-    });
-  }
-  state.seriesType = type;
-  state.priceLines = {}; // garis lama menempel di series lama -> buang ref
-  return state.series.main;
-}
-
-function renderCandles(payload) {
-  const series = setMainSeries("candles");
-  const bars = payload.bars || [];
-  series.setData(bars.map((b) => ({
-    time: b.time, open: b.open, high: b.high, low: b.low, close: b.close,
-  })));
-  state.series.vol.setData(bars.map((b) => ({
-    time: b.time,
-    value: b.volume,
-    color: b.close >= b.open ? "rgba(0,229,153,0.28)" : "rgba(255,59,105,0.28)",
-  })));
-  state.chart.timeScale().fitContent();
-  const last = bars[bars.length - 1];
-  state.lastBar = last
-    ? { time: last.time, open: last.open, high: last.high, low: last.low, close: last.close }
-    : null;
-}
+/* Chart utama kini widget TradingView (iframe cross-origin): data OHLC,
+   toolbar gambar, timeframe & Indicators ditangani TradingView sendiri.
+   Fungsi lama (klines/candle/area/tick) sudah tidak dipakai di sini. */
 
 async function fetchAndRenderChart(coinId) {
-  const cfg = TF_CONFIG[state.tf] || TF_CONFIG["90D"];
-  if (cfg.src === "binance") {
-    try {
-      const k = await api(
-        `/api/crypto/${coinId}/klines?interval=${cfg.interval}&limit=${cfg.limit}`
-      );
-      if (k && k.bars && k.bars.length) {
-        renderCandles(k);
-        return;
-      }
-    } catch (_) { /* fallback CoinGecko di bawah */ }
-  }
-  const history = await api(`/api/crypto/${coinId}/history?days=${cfg.days || 90}`);
-  renderChart(history);
+  mountTradingView(coinId);
 }
 
-/* --------- Live ticking bar terakhir (candle OHLC / titik area) --------- */
+/* --------- Level SL / TP / Trailing dari kalkulasi Recy --------- */
 
-function tickLastBar(newPrice) {
-  if (!state.series.main || !state.lastBar || Number.isNaN(newPrice)) return;
-  try {
-    if (state.seriesType === "candles") {
-      const bar = {
-        time: state.lastBar.time,
-        open: state.lastBar.open,
-        high: Math.max(state.lastBar.high, newPrice),
-        low: Math.min(state.lastBar.low, newPrice),
-        close: newPrice,
-      };
-      state.series.main.update(bar);
-      state.lastBar = bar;
-    } else {
-      state.series.main.update({ time: state.lastBar.time, value: newPrice });
-      state.lastBar = { time: state.lastBar.time, value: newPrice };
-    }
-  } catch (_) {}
-}
+/* Level SL / TP / Trailing dari kalkulasi Recy.
 
-/* --------- Garis SL / TP / Trailing di chart --------- */
-
+   Widget TradingView hosted tidak mendukung createShape/createPriceLine
+   (API Charting Library) sehingga garis tidak bisa disuntik ke dalam iframe.
+   Level dirender sebagai chip ringkas di HEADER chart (di luar area chart,
+   tidak menutupi candle) — selalu sinkron dengan kartu Execution. Tiap chip
+   punya tombol lonceng: sekali klik memasang alert harga di level tsb
+   (SL & trigger = BELOW/ABOVE sesuai arah). */
 function updatePriceLines() {
-  if (!state.series.main) return;
-  for (const ref of Object.values(state.priceLines || {})) {
-    try { state.series.main.removePriceLine(ref); } catch (_) {}
-  }
-  state.priceLines = {};
+  const el = $("#level-chips");
+  if (!el) return;
   const e = state.exec;
-  if (!e) return;
-  const add = (price, color, title, style) => {
+  const chip = (label, raw, color, cls, dir) => {
     // Trailing berupa kalimat ("Trigger saat harga >= 85493.51 (+1.6%…)")
     // — ambil ANGKA PERTAMA dari teks; angka polos ikut terbaca.
-    const m = String(price ?? "").match(/\d+(?:\.\d+)?/);
+    const m = String(raw ?? "").match(/\d+(?:\.\d+)?/);
     const p = m ? parseFloat(m[0]) : NaN;
-    if (!(p > 0)) return;
-    try {
-      state.priceLines[title] = state.series.main.createPriceLine({
-        price: p, color, lineWidth: 1, lineStyle: style,
-        axisLabelVisible: true, title,
-      });
-    } catch (_) {}
+    if (!(p > 0)) return "";
+    return `<span class="lvl-chip ${cls}">
+      <span class="lvl-dot" style="background:${color}"></span>
+      <span class="lvl-tag">${label}</span>
+      <span class="num">$${fmtPrice(p)}</span>
+      <button class="lvl-bell" data-level-alert="${dir}" data-level-price="${p}"
+        title="Buat alert harga ${dir === "BELOW" ? "≤" : "≥"} $${fmtPrice(p)}"><i class="fa-solid fa-bell"></i></button>
+    </span>`;
   };
-  add(e.stop_loss_price, "#FF3B69", "SL", LightweightCharts.LineStyle.Solid);
-  add(e.take_profit_price, "#00E599", "TP", LightweightCharts.LineStyle.Solid);
-  add(e.trailing_stop_trigger, "#F59E0B", "Trailing", LightweightCharts.LineStyle.Dashed);
+  if (!e) { el.innerHTML = ""; el.classList.add("hidden"); return; }
+  const html =
+    chip("SL", e.stop_loss_price, "#FF3B69", "lvl-sl", "BELOW") +
+    chip("TP", e.take_profit_price, "#00E599", "lvl-tp", "ABOVE") +
+    chip("Trail", e.trailing_stop_trigger, "#F59E0B", "lvl-trail", "ABOVE");
+  // Hindari rebuild DOM tiap tick WS (kolom harga bergerak sub-detik).
+  if (el.innerHTML !== html) el.innerHTML = html;
+  el.classList.toggle("hidden", !html);
+}
+
+/* Alert harga sekali klik dari chip level — pakai endpoint /api/alerts/price
+   yang sudah ada (evaluasi otomatis di siklus live-prices / poll alert). */
+async function quickLevelAlert(direction, price) {
+  if (!state.selected) return;
+  try {
+    const res = await fetch("/api/alerts/price", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coin_id: state.selected, direction, target_price: price }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    toast(`🔔 Alert ${state.selected.toUpperCase()} ${direction === "ABOVE" ? "≥" : "≤"} $${fmtPrice(price)} aktif.`);
+    if (!$("#alert-modal").classList.contains("hidden")) refreshAlertList();
+  } catch (err) {
+    toast("Gagal membuat alert: " + err.message, "err");
+  }
+}
+
+/* Zoom chart: kelas di <body> agar chart-card menempel penuh ke viewport
+   (header chart tetap terlihat — timeframe, level, tombol keluar). */
+function toggleChartZoom() {
+  const on = document.body.classList.toggle("chart-zoomed");
+  const btn = $("#btn-chart-zoom");
+  if (btn) {
+    btn.innerHTML = on
+      ? '<i class="fa-solid fa-compress"></i>'
+      : '<i class="fa-solid fa-expand"></i>';
+    btn.title = on ? "Kembalikan ukuran (Esc)" : "Perbesar chart (Esc untuk keluar)";
+  }
+  // Widget TradingView (iframe autosize) mengikuti resize window.
+  setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
+}
+
+/* Catat Posisi dari kartu Execution — prefill harga live & qty kalkulator. */
+function logPositionPrefill() {
+  if (!state.selected) return toast("Pilih koin dulu di watchlist.", "err");
+  const price = Number(state.exec?.current_price) ||
+    Number(state.coins.find((c) => c.coin_id === state.selected)?.price) || 0;
+  openPfModal(state.selected, price > 0 ? price : null, state.calcQty || null);
 }
 
 /* --------- Uji Strategi (backtest on-demand, mesin 29 unit test) --------- */
@@ -934,38 +1116,64 @@ function closeAlertModal() {
   $("#alert-modal").classList.add("hidden");
 }
 
+const AL_EMPTY_PRICE = `Belum ada aturan — contoh: <b class="text-cyan">BTC ≥ $90.000</b> memberi kabar saat harga menyentuh.`;
+const AL_EMPTY_IND = `Belum ada aturan indikator — contoh: <b class="text-cyan">SOL RSI ≤ 30</b> memberi kabar saat oversold.`;
+
+function renderAlRows(list, items, emptyHtml) {
+  if (!items.length) {
+    list.innerHTML = `<div class="p-4 text-center text-[11.5px] text-muted">${emptyHtml}</div>`;
+    return;
+  }
+  const fmtWhen = (iso) => new Date(iso).toLocaleString("id-ID", {
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+  list.innerHTML = items.map((a) => {
+    const arrow = a.direction === "ABOVE" ? "≥" : "≤";
+    const done = !a.active;
+    const isInd = a.indicator != null;
+    const head = isInd
+      ? `${esc(a.coin_id.toUpperCase())} ${esc(a.indicator)} ${arrow} ${a.target}`
+      : `${esc(a.coin_id.toUpperCase())} ${arrow} $${fmtPrice(a.target_price)}`;
+    const meta = done
+      ? `terpicu ${fmtWhen(a.triggered_at)} @ ${isInd ? a.trigger_value : "$" + fmtPrice(a.trigger_price)}`
+      : `aktif • sejak ${new Date(a.created_at).toLocaleDateString("id-ID", { day: "2-digit", month: "2-digit" })}`;
+    return `<div class="al-row ${done ? "al-done" : ""}">
+      <div class="min-w-0">
+        <div class="truncate text-[12.5px] font-semibold">${head}${done ? ` <span class="badge badge-bull" style="padding:1px 6px;font-size:9px;">TERPICU</span>` : ""}</div>
+        <div class="text-[10px] text-muted">${meta}</div>
+      </div>
+      <span class="pf-act del" data-al-del="${esc(a.id)}" title="Hapus aturan"><i class="fa-solid fa-trash-can"></i></span>
+    </div>`;
+  }).join("");
+  list.querySelectorAll("[data-al-del]").forEach((el) =>
+    el.addEventListener("click", async () => {
+      await fetch(`/api/alerts/price/${el.dataset.alDel}`, { method: "DELETE" }).catch(() => {});
+      refreshAlertList();
+    })
+  );
+}
+
 async function refreshAlertList() {
   const list = $("#al-list");
+  const indList = $("#ali-list");
   if (!list) return;
   try {
     const d = await api("/api/alerts/price");
-    const items = [...(d.active || []), ...(d.triggered || [])];
-    if (!items.length) {
-      list.innerHTML = `<div class="p-4 text-center text-[11.5px] text-muted">Belum ada aturan — contoh: <b class="text-cyan">BTC ≥ $90.000</b> memberi kabar saat harga menyentuh.</div>`;
-      return;
-    }
-    list.innerHTML = items.map((a) => {
-      const arrow = a.direction === "ABOVE" ? "≥" : "≤";
-      const done = !a.active;
-      const meta = done
-        ? `terpicu ${new Date(a.triggered_at).toLocaleString("id-ID", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} @ $${fmtPrice(a.trigger_price)}`
-        : `aktif • sejak ${new Date(a.created_at).toLocaleDateString("id-ID", { day: "2-digit", month: "2-digit" })}`;
-      return `<div class="al-row ${done ? "al-done" : ""}">
-        <div class="min-w-0">
-          <div class="truncate text-[12.5px] font-semibold">${esc(a.coin_id.toUpperCase())} ${arrow} $${fmtPrice(a.target_price)}${done ? ` <span class="badge badge-bull" style="padding:1px 6px;font-size:9px;">TERPICU</span>` : ""}</div>
-          <div class="text-[10px] text-muted">${meta}</div>
-        </div>
-        <span class="pf-act del" data-al-del="${esc(a.id)}" title="Hapus aturan"><i class="fa-solid fa-trash-can"></i></span>
-      </div>`;
-    }).join("");
-    list.querySelectorAll("[data-al-del]").forEach((el) =>
-      el.addEventListener("click", async () => {
-        await fetch(`/api/alerts/price/${el.dataset.alDel}`, { method: "DELETE" }).catch(() => {});
-        refreshAlertList();
-      })
+    renderAlRows(
+      list,
+      [...(d.active || []), ...(d.triggered || [])],
+      AL_EMPTY_PRICE
     );
+    if (indList) {
+      renderAlRows(
+        indList,
+        [...(d.indicator_active || []), ...(d.indicator_triggered || [])],
+        AL_EMPTY_IND
+      );
+    }
   } catch (err) {
     list.innerHTML = `<div class="p-4 text-center text-bear text-[11.5px]">Gagal memuat: ${esc(err.message)}</div>`;
+    if (indList) indList.innerHTML = "";
   }
 }
 
@@ -994,12 +1202,100 @@ async function addPriceAlert() {
 function handleAlertTriggers(triggered) {
   for (const a of triggered) {
     const arrow = a.direction === "ABOVE" ? "≥" : "≤";
-    const title = `🚨 ALERT ${String(a.coin_id).toUpperCase()}: ${arrow} $${fmtPrice(a.target_price)}`;
-    const body = `Terkirim pada harga live $${fmtPrice(a.trigger_price)}`;
-    fireNotif(title, body, `alert-${a.id}`);
+    let title, body, tag;
+    if (a.indicator != null) {
+      // Alert indikator (Phase 10): RSI14 / ADX.
+      title = `📉 ALERT ${String(a.coin_id).toUpperCase()}: ${a.indicator} ${arrow} ${a.target}`;
+      body = `Nilai terkini ${a.trigger_value}`;
+      tag = `ind-${a.id}`;
+    } else {
+      title = `🚨 ALERT ${String(a.coin_id).toUpperCase()}: ${arrow} $${fmtPrice(a.target_price)}`;
+      body = `Terkirim pada harga live $${fmtPrice(a.trigger_price)}`;
+      tag = `alert-${a.id}`;
+    }
+    fireNotif(title, body, tag);
     toast(`${title} — ${body}`);
   }
   if (!$("#alert-modal").classList.contains("hidden")) refreshAlertList();
+}
+
+/* --------- Alert indikator (RSI14 / ADX) — Phase 10 --------- */
+
+async function addIndicatorAlert() {
+  const coinId = $("#ali-coin").value.trim();
+  const indicator = $("#ali-ind").value;
+  const dir = $("#ali-dir").value;
+  const target = parseFloat($("#ali-target").value);
+  if (!coinId) return toast("Koin wajib diisi.", "err");
+  if (!(target > 0)) return toast("Nilai indikator harus > 0.", "err");
+  try {
+    const res = await fetch("/api/alerts/indicator", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coin_id: coinId, indicator, direction: dir, target }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    $("#ali-target").value = "";
+    toast(
+      `📉 Alert ${body.alert.coin_id.toUpperCase()} ${indicator} ${dir === "ABOVE" ? "≥" : "≤"} ${target} aktif.`
+    );
+    refreshAlertList();
+  } catch (err) {
+    toast("Gagal menambah alert indikator: " + err.message, "err");
+  }
+}
+
+/* --------- Backup & Restore jurnal (Phase 10) --------- */
+
+async function downloadBackup() {
+  try {
+    const data = await api("/api/portfolio/backup");
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `recy-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast("⬇️ Backup jurnal diunduh (posisi, riwayat, alert).");
+  } catch (err) {
+    toast("Backup gagal: " + err.message, "err");
+  }
+}
+
+async function restoreBackup(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = "";
+  if (!file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    if (!payload || (payload.type !== "recy-journal-backup" && !payload.portfolio && !payload.alerts)) {
+      throw new Error("bukan file backup Recy yang valid");
+    }
+    if (!confirm(
+      "Restore mode MERGE: data di file digabungkan dengan jurnal saat ini "
+      + "(id lama tidak ditimpa). Lanjutkan?"
+    )) return;
+    const res = await fetch("/api/portfolio/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "merge",
+        portfolio: payload.portfolio ?? null,
+        alerts: payload.alerts ?? null,
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    toast("✅ Jurnal dipulihkan dari backup.");
+    await loadPortfolio();
+    if (!$("#alert-modal").classList.contains("hidden")) refreshAlertList();
+  } catch (err) {
+    toast("Restore gagal: " + err.message, "err");
+  }
 }
 
 /* --------- Equity curve realized PnL + ekspor CSV --------- */
@@ -1357,12 +1653,8 @@ function patchDetailLive(c) {
     const trEl = $("#p-trailing");
     if (trEl && c.trailing_stop_trigger) trEl.textContent = c.trailing_stop_trigger;
     updateCalculator();
-    updatePriceLines();
+    updatePriceLines(); // chip level SL/TP di header chart
   }
-
-  // (Phase 8/9) Live ticking grafik — juga dari jalur HTTP polling
-  // fallback agar grafik ikut bergerak walau WebSocket offline.
-  if (c.price != null) tickLastBar(Number(c.price));
 }
 
 function applyLiveItems(items) {
@@ -1372,11 +1664,13 @@ function applyLiveItems(items) {
   for (const c of state.coins) {
     const lp = byId.get(c.coin_id);
     if (!lp || lp.error) continue;
+    // Data pulih (indikator OK kembali) -> hapus status offline baris.
+    if (c.error && lp.price != null) delete c.error;
     for (const key of [
       "price", "price_source", "sl_price", "tp_price",
       "trailing_stop_trigger", "risk_reward_ratio",
       "suggested_allocation_pct", "trend", "recommendation",
-      "change_24h_pct", "adx_14",
+      "change_24h_pct", "adx_14", "signal", "signal_source",
     ]) {
       if (lp[key] != null) c[key] = lp[key];
     }
@@ -1387,13 +1681,13 @@ function applyLiveItems(items) {
     const c = state.coins.find((x) => x.coin_id === tr.dataset.coin);
     if (!c) return;
     const price = tr.querySelector(".cell-price");
-    if (price) price.innerHTML = `$${fmtPrice(c.price)}${c.error ? `<div class="text-[9.5px] text-bear">error</div>` : ""}`;
+    if (price) price.innerHTML = priceCellHTML(c);
     const sl = tr.querySelector(".cell-sl");
     if (sl) sl.textContent = `$${fmtPrice(c.sl_price)}`;
     const tp = tr.querySelector(".cell-tp");
     if (tp) tp.textContent = `$${fmtPrice(c.tp_price)}`;
     const sig = tr.querySelector(".cell-signal");
-    if (sig) sig.innerHTML = REC_BADGE[c.recommendation] || `<span class="badge badge-neutral">${esc(c.recommendation || "—")}</span>`;
+    if (sig) sig.innerHTML = signalCellHTML(c);
   });
 
   // 3. Header koin terpilih + kartu execution (bila koin tsb dipilih).
@@ -1457,7 +1751,7 @@ function handleWsTickerBatch(tickers) {
     if (tr) {
       const priceEl = tr.querySelector(".cell-price");
       if (priceEl) {
-        priceEl.innerHTML = `$${fmtPrice(newPrice)}${c.error ? `<div class="text-[9.5px] text-bear">error</div>` : ""}`;
+        priceEl.innerHTML = priceCellHTML(c);
         if (movedUp) {
           priceEl.classList.remove("price-flash-down");
           priceEl.classList.add("price-flash-up");
@@ -1470,11 +1764,10 @@ function handleWsTickerBatch(tickers) {
       }
     }
 
-    // Bila koin ini sedang dipilih, perbarui header & kartu eksekusi
+    // Bila koin ini sedang dipilih, perbarui header & kartu eksekusi.
+    // (Chart TradingView sudah live dari servernya sendiri — tidak perlu
+    // disuntik tick manual seperti chart LightweightCharts sebelumnya.)
     if (state.selected && c.coin_id === state.selected) {
-      // (Phase 8/9) Live chart ticking — bar terakhir (candle OHLC atau
-      // titik area) langsung bergerak mengikuti tick harga Binance.
-      tickLastBar(newPrice);
       patchDetailLive(c);
       const dPrice = $("#d-price");
       if (dPrice) {
@@ -1556,7 +1849,9 @@ function initBinanceWebSocket() {
 
 async function pollLivePrices() {
   try {
-    const data = await api(`/api/crypto/live-prices?coins=${encodeURIComponent(watchParams())}`);
+    const data = await api(
+      `/api/crypto/live-prices?coins=${encodeURIComponent(watchParams())}&${signalParams()}`
+    );
     // (Phase 9) Alert harga yang baru terpicu -> notifikasi desktop + toast.
     if (data.alerts_triggered && data.alerts_triggered.length) {
       handleAlertTriggers(data.alerts_triggered);
@@ -1575,9 +1870,11 @@ async function pollLivePrices() {
 async function pollAlerts() {
   try {
     const d = await api(`/api/alerts/price/check?coins=${encodeURIComponent(watchParams())}`);
-    if (d.alerts_triggered && d.alerts_triggered.length) {
-      handleAlertTriggers(d.alerts_triggered);
-    }
+    const triggered = [
+      ...(d.alerts_triggered || []),
+      ...(d.indicator_alerts_triggered || []), // Phase 10
+    ];
+    if (triggered.length) handleAlertTriggers(triggered);
   } catch (err) {
     console.warn("alerts:", err.message); // alert bersifat opsional
   }
@@ -1605,25 +1902,36 @@ async function selectCoin(coinId) {
 }
 
 async function loadDetail(coinId, { withAnalysis = false } = {}) {
-  if (state.loadingDetail) return;
   if (state.selected !== coinId) return; // pilihan sudah berganti
+  if (state.loadingDetail) {
+    // Jangan jatuhkan permintaan: antrekan agar permintaan TERAKHIR selalu
+    // dieksekusi (mis. poll 30 dtk sedang fetch analisis lambat saat
+    // pengguna mengklik koin lain -> detail koin baru tetap termuat).
+    state.pendingDetail = { coinId, withAnalysis };
+    return;
+  }
   state.loadingDetail = true;
 
   try {
-    const jobs = [
-      fetchAndRenderChart(coinId),
-      api(`/api/crypto/${coinId}/technical/score`),
-    ];
-    if (withAnalysis) jobs.push(api(`/api/crypto/${coinId}/analysis`));
+    // Chart TradingView: mount/rebuild simbol (sinkron, tanpa request backend).
+    fetchAndRenderChart(coinId);
+
+    // Indikator teknikal dihitung pada timeframe chart aktif + trading style.
+    const sigQ = `tf=${encodeURIComponent(state.tf)}&mode=${encodeURIComponent(state.sigMode)}`;
+    const jobs = [api(`/api/crypto/${coinId}/technical/score?${sigQ}`)];
+    if (withAnalysis) jobs.push(api(`/api/crypto/${coinId}/analysis?${sigQ}`));
 
     const results = await Promise.allSettled(jobs);
     if (state.selected !== coinId) return; // tidak tampil lagi
 
-    const [hist, score, analysis] = results;
-    if (hist.status === "rejected") console.warn("chart:", hist.reason?.message);
-    // hist (fetchAndRenderChart) sudah me-render chart di dalam promise.
+    const [score, analysis] = results;
     if (score.status === "fulfilled") {
-      renderGauges(score.value.score, score.value.latest_data, analysis?.status === "fulfilled" ? analysis.value : null);
+      renderGauges(
+        score.value.score,
+        score.value.latest_data,
+        analysis?.status === "fulfilled" ? analysis.value : null,
+        score.value.signal
+      );
     }
     if (withAnalysis) {
       if (analysis.status === "fulfilled") {
@@ -1636,9 +1944,14 @@ async function loadDetail(coinId, { withAnalysis = false } = {}) {
     } else if (analysis === undefined && score.status === "fulfilled") {
       // refresh berkala: gauges pakai sentimen dari render sebelumnya (tetap)
     }
-    updatePriceLines(); // pastikan garis SL/TP melekat di series terbaru
+    updatePriceLines(); // pastikan chip level sinkron dgn kartu execution
   } finally {
     state.loadingDetail = false;
+    const pending = state.pendingDetail;
+    state.pendingDetail = null;
+    if (pending && state.selected === pending.coinId) {
+      loadDetail(pending.coinId, { withAnalysis: pending.withAnalysis });
+    }
   }
 }
 
@@ -1669,7 +1982,13 @@ function setTimeframe(tf) {
   document.querySelectorAll(".tf-btn").forEach((b) =>
     b.classList.toggle("active", b.dataset.tf === tf)
   );
-  if (state.selected) refreshChart();
+  if (state.selected) {
+    // Timeframe tidak hanya mengubah chart — indikator teknikal, gauge,
+    // RSI/MACD & signal strength ikut dihitung ulang pada timeframe ini.
+    refreshChart();
+    loadDetail(state.selected, { withAnalysis: false });
+    toast(`Timeframe ${tf} — chart & indikator teknikal diperbarui.`);
+  }
 }
 
 async function refreshChart() {
@@ -1704,16 +2023,29 @@ async function addCoin() {
   const input = $("#input-add-coin");
   const q = input.value.trim().toLowerCase();
   if (!q) return;
-  if (DEFAULT_COINS.includes(q) || state.custom.includes(q)) {
-    toast(`"${q}" sudah ada di watchlist.`);
-    input.value = "";
+  input.value = "";
+
+  // Resolusi dulu ke coin_id CoinGecko (mis. "doge"/"Dogecoin" ->
+  // "dogecoin") sehingga: (1) tombol hapus (x) selalu tampil, (2) koin
+  // kustom tersimpan dengan id final — tidak ada lagi koin yang salah
+  // terdeteksi "tidak ditemukan" karena beda bentuk nama.
+  let resolved;
+  try {
+    const r = await api(`/api/coins/resolve?q=${encodeURIComponent(q)}`);
+    resolved = r.coin_id;
+  } catch (_) {
+    toast(`Koin "${q}" tidak ditemukan di CoinGecko.`, "err");
     return;
   }
-  state.custom.push(q);
+
+  if (DEFAULT_COINS.includes(resolved) || state.custom.includes(resolved)) {
+    toast(`"${q}" sudah ada di watchlist.`);
+    return;
+  }
+  state.custom.push(resolved);
   saveCustomCoins();
-  state.pendingAdd = q;
-  input.value = "";
-  await loadWatchlist(); // backend resolve nama/simbol -> coin_id
+  state.pendingAdd = resolved;
+  await loadWatchlist();
 }
 
 async function testTelegram() {
@@ -1727,7 +2059,7 @@ async function testTelegram() {
 }
 
 function boot() {
-  $("#btn-refresh").addEventListener("click", () => {
+  $("#btn-refresh")?.addEventListener("click", () => {
     const icon = $("#btn-refresh i");
     icon.classList.add("spin");
     Promise.all([loadWatchlist(), loadFng()]).finally(() =>
@@ -1736,8 +2068,8 @@ function boot() {
   });
 
   // Tambah / hapus koin watchlist (tersimpan di localStorage).
-  $("#btn-add-coin").addEventListener("click", addCoin);
-  $("#input-add-coin").addEventListener("keydown", (ev) => {
+  $("#btn-add-coin")?.addEventListener("click", addCoin);
+  $("#input-add-coin")?.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") addCoin();
   });
 
@@ -1761,27 +2093,27 @@ function boot() {
   ["#calc-asset", "#calc-rate"].forEach((sel) =>
     $(sel).addEventListener("input", updateCalculator)
   );
-  $("#calc-currency").addEventListener("change", () => {
+  $("#calc-currency")?.addEventListener("change", () => {
     $("#calc-rate").classList.toggle("hidden", $("#calc-currency").value !== "IDR");
     updateCalculator();
   });
 
   // Telegram test.
-  $("#btn-tg").addEventListener("click", testTelegram);
+  $("#btn-tg")?.addEventListener("click", testTelegram);
 
   // Portofolio: modal tambah & hapus posisi.
-  $("#btn-add-position").addEventListener("click", () => openPfModal(state.selected || ""));
-  $("#pf-modal-close").addEventListener("click", closePfModal);
-  $("#pf-modal").addEventListener("click", (ev) => {
+  $("#btn-add-position")?.addEventListener("click", () => openPfModal(state.selected || ""));
+  $("#pf-modal-close")?.addEventListener("click", closePfModal);
+  $("#pf-modal")?.addEventListener("click", (ev) => {
     if (ev.target === $("#pf-modal")) closePfModal();
   });
-  $("#pf-save").addEventListener("click", addPosition);
+  $("#pf-save")?.addEventListener("click", addPosition);
 
   // Modal tutup posisi (realized PnL).
-  $("#close-modal-cancel-x").addEventListener("click", closeCloseModal);
-  $("#close-cancel").addEventListener("click", closeCloseModal);
-  $("#close-confirm").addEventListener("click", confirmClosePosition);
-  $("#close-modal").addEventListener("click", (ev) => {
+  $("#close-modal-cancel-x")?.addEventListener("click", closeCloseModal);
+  $("#close-cancel")?.addEventListener("click", closeCloseModal);
+  $("#close-confirm")?.addEventListener("click", confirmClosePosition);
+  $("#close-modal")?.addEventListener("click", (ev) => {
     if (ev.target === $("#close-modal")) closeCloseModal();
   });
 
@@ -1801,32 +2133,104 @@ function boot() {
     })
   );
 
+  // Filter Timeframe Sinyal (Intraday vs Makro) — indikator & sinyal
+  // watchlist dihitung ulang pada timeframe yang dipilih (persisten).
+  document.querySelectorAll(".chip[data-sigt]").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (state.sigTf === b.dataset.sigt) return;
+      state.sigTf = b.dataset.sigt;
+      saveSignalPrefs();
+      document.querySelectorAll(".chip[data-sigt]").forEach((x) =>
+        x.classList.toggle("active", x === b)
+      );
+      toast(`Sinyal watchlist: timeframe ${state.sigTf}.`);
+      loadWatchlist();
+      if (state.selected) loadDetail(state.selected, { withAnalysis: false });
+    })
+  );
+
+  // Trading Style / Mode Sensitivitas Sinyal (Scalping vs Swing):
+  // mengubah ambang BUY/SELL + filter trend di seluruh dashboard.
+  document.querySelectorAll(".chip[data-mode]").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (state.sigMode === b.dataset.mode) return;
+      state.sigMode = b.dataset.mode;
+      saveSignalPrefs();
+      document.querySelectorAll(".chip[data-mode]").forEach((x) =>
+        x.classList.toggle("active", x === b)
+      );
+      const th = state.sigMode === "scalp" ? "BUY ≥ 60 · SELL < 40" : "BUY ≥ 68 · SELL < 32";
+      toast(`Trading style: ${MODE_LABEL[state.sigMode]} — ambang ${th}.`);
+      loadWatchlist();
+      if (state.selected) loadDetail(state.selected, { withAnalysis: true });
+    })
+  );
+
+  // Sinkronkan keadaan chip dgn preferensi tersimpan (localStorage).
+  document.querySelectorAll(".chip[data-sigt]").forEach((x) =>
+    x.classList.toggle("active", x.dataset.sigt === state.sigTf)
+  );
+  document.querySelectorAll(".chip[data-mode]").forEach((x) =>
+    x.classList.toggle("active", x.dataset.mode === state.sigMode)
+  );
+
   // Notifikasi desktop native (Web Notification API).
-  $("#btn-notif").addEventListener("click", toggleNotif);
+  $("#btn-notif")?.addEventListener("click", toggleNotif);
   updateNotifBtn();
 
   // (Phase 9) Uji Strategi — backtest on-demand.
-  $("#btn-backtest").addEventListener("click", runBacktest);
+  $("#btn-backtest")?.addEventListener("click", runBacktest);
+
+  // Zoom chart (tombol di header chart) + keluar dengan Esc.
+  // (Guard opsional: elemen hanya ada di index.html versi terbaru.)
+  $("#btn-chart-zoom")?.addEventListener("click", toggleChartZoom);
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && document.body.classList.contains("chart-zoomed")) {
+      toggleChartZoom();
+    }
+  });
+
+  // Alert sekali klik dari chip level SL/TP/Trailing (delegasi event).
+  // (Guard opsional: elemen hanya ada di index.html versi terbaru.)
+  $("#level-chips")?.addEventListener("click", (ev) => {
+    const bell = ev.target.closest("[data-level-alert]");
+    if (!bell) return;
+    quickLevelAlert(bell.dataset.levelAlert, parseFloat(bell.dataset.levelPrice));
+  });
+
+  // Catat Posisi dari kartu Execution (prefill harga & qty kalkulator).
+  $("#btn-log-position")?.addEventListener("click", logPositionPrefill);
 
   // (Phase 9) Alert harga custom (modal).
-  $("#btn-alerts").addEventListener("click", openAlertModal);
-  $("#alert-modal-close").addEventListener("click", closeAlertModal);
-  $("#alert-modal").addEventListener("click", (ev) => {
+  $("#btn-alerts")?.addEventListener("click", openAlertModal);
+  $("#alert-modal-close")?.addEventListener("click", closeAlertModal);
+  $("#alert-modal")?.addEventListener("click", (ev) => {
     if (ev.target === $("#alert-modal")) closeAlertModal();
   });
-  $("#al-save").addEventListener("click", addPriceAlert);
-  $("#al-target").addEventListener("keydown", (ev) => {
+  $("#al-save")?.addEventListener("click", addPriceAlert);
+  $("#al-target")?.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") addPriceAlert();
   });
 
+  // (Phase 10) Alert indikator (RSI/ADX).
+  $("#ali-save")?.addEventListener("click", addIndicatorAlert);
+  $("#ali-target")?.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") addIndicatorAlert();
+  });
+
+  // (Phase 10) Backup & restore jurnal.
+  $("#btn-backup")?.addEventListener("click", downloadBackup);
+  $("#btn-restore")?.addEventListener("click", () => $("#restore-file").click());
+  $("#restore-file")?.addEventListener("change", restoreBackup);
+
   // (Phase 9) Sortir watchlist (client-side instan).
-  $("#wl-sort").addEventListener("change", () => {
+  $("#wl-sort")?.addEventListener("change", () => {
     state.sort = $("#wl-sort").value;
     renderWatchlist();
   });
 
   // (Phase 9) Ekspor CSV jurnal trade selesai.
-  $("#btn-csv").addEventListener("click", exportTradesCsv);
+  $("#btn-csv")?.addEventListener("click", exportTradesCsv);
 
   // Tab visibility: jeda polling saat tersembunyi, refresh saat kembali.
   document.addEventListener("visibilitychange", () => {
@@ -1842,7 +2246,7 @@ function boot() {
   });
 
   loadFng();
-  loadWatchlist();
+  loadWatchlist().then(normalizeCustomCoins);
   loadPortfolio();
   startPolling();
 }

@@ -401,18 +401,87 @@ select.calc-input { width: auto; cursor: pointer; }
 
 .chart-card {
   display: flex; flex-direction: column;
-  flex: 1; min-height: 170px;
+  flex: 1; min-height: 220px;
   overflow: hidden;
 }
-.chart-canvas { flex: 1; min-height: 150px; width: 100%; }
+.chart-canvas { flex: 1; min-height: 220px; width: 100%; }
 
-/* Dua kartu berdampingan di bawah chart */
+/* Header chart: timeframe | chip level SL/TP | simbol + tombol zoom */
+.chart-head {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  flex: none;
+}
+.tv-symbol-label {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.4px;
+  color: var(--muted); white-space: nowrap;
+}
+.icon-btn {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: rgba(11, 14, 20, 0.55); color: var(--muted);
+  cursor: pointer; font-size: 11px;
+  transition: all 0.18s ease;
+}
+.icon-btn:hover {
+  color: var(--cyan); border-color: rgba(0, 216, 255, 0.5);
+  background: rgba(0, 216, 255, 0.1);
+}
+
+/* Chip level Recy (SL/TP/Trailing) — di header, di LUAR area chart */
+.level-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.level-chips.hidden { display: none; }
+.lvl-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border-radius: 999px;
+  border: 1px solid var(--border); background: rgba(11, 14, 20, 0.55);
+  font-size: 11px; color: var(--text); white-space: nowrap;
+}
+.lvl-dot { width: 8px; height: 2px; border-radius: 1px; flex: none; }
+.lvl-tag { font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; color: var(--muted); }
+.lvl-sl .lvl-tag { color: #ff3b69; }
+.lvl-tp .lvl-tag { color: #00e599; }
+.lvl-trail .lvl-tag { color: #f59e0b; }
+.lvl-bell {
+  border: none; background: transparent; color: var(--muted);
+  cursor: pointer; font-size: 10px; padding: 0 1px; border-radius: 4px;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+.lvl-bell:hover { color: var(--cyan); transform: scale(1.2); }
+
+/* Chart TradingView (widget hosted di iframe): kontainer mengisi area chart. */
+.tv-wrap { position: relative; }
+#tv-chart { position: absolute; inset: 0; }
+.tv-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  color: #8a94a8;
+  font-size: 12.5px;
+  background: #0d131f;
+}
+
+/* Dua kartu berdampingan di bawah chart — chart dapat porsi lebih besar */
 .cards-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  height: clamp(240px, 45vh, 500px);
+  height: clamp(220px, 36vh, 460px);
   flex: none;
+}
+
+/* Layar tinggi (desktop): chart diprioritaskan makin besar */
+@media (min-height: 800px) {
+  .chart-card { min-height: 320px; }
+  .chart-canvas { min-height: 300px; }
 }
 
 .exec-card, .tech-card {
@@ -480,6 +549,22 @@ select.calc-input { width: auto; cursor: pointer; }
   body { display: flex; flex-direction: column; }
   .terminal-main { flex: 1; min-height: 0; }
 }
+
+/* ==========================================================================
+   Mode zoom chart — chart-card menempel penuh ke viewport (Esc untuk keluar).
+   Header chart (timeframe, chip level, simbol, tombol) tetap terlihat.
+   z-index 70: di atas topbar (50), di bawah modal (80) & toast (100).
+   ========================================================================== */
+body.chart-zoomed { overflow: hidden; }
+body.chart-zoomed .chart-card {
+  position: fixed;
+  inset: 8px;
+  z-index: 70;
+  background: var(--surface-solid);
+  border-color: #33436b;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+}
+body.chart-zoomed .chart-canvas { height: auto; flex: 1; min-height: 0; }
 
 /* ==========================================================================
    Phase 8 — Quick Filter, Jurnal Trade Selesai & Notifikasi Desktop
@@ -560,7 +645,8 @@ select.calc-input { width: auto; cursor: pointer; }
   .detail-empty { flex: none; }
   .right-body { flex: none; }
   .chart-card { flex: none; }
-  .chart-canvas { height: 300px; flex: none; }
+  .chart-canvas { height: 380px; flex: none; }
+  body.chart-zoomed .chart-canvas { height: auto; }
   .cards-row { grid-template-columns: 1fr; height: auto; }
   .exec-card, .tech-card { overflow: visible; }
   .scroll-area { overflow: visible; }
@@ -591,6 +677,19 @@ select.calc-input { width: auto; cursor: pointer; }
 /* Modal alert harga custom */
 .al-form { display: grid; grid-template-columns: 1fr auto 104px auto; gap: 8px; align-items: center; }
 .al-form .search-input { width: 100%; }
+
+/* Form alert indikator (Phase 10): koin, indikator, arah, nilai, tambah */
+.al-form-ind { grid-template-columns: 1fr auto auto 84px auto; }
+
+/* Pemisah judul antar seksi di modal alert */
+.al-sep {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--muted);
+}
+.al-sep::before, .al-sep::after {
+  content: ""; flex: 1; height: 1px; background: rgba(38, 50, 74, 0.6);
+}
 .al-list {
   max-height: 220px; overflow-y: auto;
   border: 1px solid rgba(38, 50, 74, 0.6); border-radius: 10px;
@@ -613,3 +712,72 @@ select.calc-input { width: auto; cursor: pointer; }
 
 /* Chip portofolio topbar */
 #pf-chip-pnl:empty { display: none; }
+
+/* ==========================================================================
+   Phase 11 — Logo Topbar, Signal Strength Gauge, Filter Sinyal & Baris Offline
+   ========================================================================== */
+
+/* Logo topbar: rounded + glow halus selaras tema neon terminal */
+.logo-glow {
+  background: rgba(11, 14, 20, 0.6);
+  box-shadow: 0 0 16px rgba(0, 229, 153, 0.35), 0 0 4px rgba(0, 216, 255, 0.25);
+}
+
+/* Filter timeframe sinyal + trading style (baris kedua watchlist) */
+.signal-filters {
+  padding-top: 2px;
+  border-top: 1px dashed rgba(38, 50, 74, 0.55);
+}
+.wl-filters-lbl {
+  font-size: 9.5px; font-weight: 800; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--muted);
+}
+.wl-filters-sep {
+  width: 1px; height: 16px;
+  background: rgba(38, 50, 74, 0.85); margin: 0 3px;
+}
+
+/* --- Signal Strength Gauge (meter keyakinan sinyal) --- */
+.sig-meter {
+  height: 4px; border-radius: 999px; margin-top: 4px;
+  background: rgba(38, 50, 74, 0.65); overflow: hidden;
+}
+.sig-fill {
+  height: 100%; border-radius: 999px; width: 0;
+  background: var(--amber);
+  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1), background 0.3s ease;
+}
+.sig-meter-lg {
+  height: 10px; margin-top: 2px;
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.4);
+}
+.sig-lbl {
+  font-size: 9px; line-height: 1.25; color: var(--muted);
+  margin-top: 2px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.cell-signal .sig-meter { max-width: 96px; }
+.sig-strength {
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px 12px; background: rgba(11, 14, 20, 0.5);
+}
+
+/* --- Baris watchlist "Data Terbatas / Offline" + tombol retry --- */
+/* Koin TIDAK dihapus dari watchlist — hanya status baris yang berubah. */
+.wl-offline {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  font-size: 9px; font-weight: 700; color: var(--amber); margin-top: 2px;
+}
+.wl-offline span { white-space: nowrap; }
+.wl-retry {
+  border: 1px solid rgba(245, 158, 11, 0.45); color: var(--amber);
+  background: rgba(245, 158, 11, 0.10); border-radius: 6px;
+  width: 18px; height: 18px; font-size: 9px; padding: 0;
+  cursor: pointer; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 0.18s ease;
+}
+.wl-retry:hover {
+  background: rgba(245, 158, 11, 0.25);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.3);
+}

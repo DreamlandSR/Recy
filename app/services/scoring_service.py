@@ -1,3 +1,43 @@
+# ============================================================================
+# Mode Sensitivitas Sinyal / Trading Style (responsivitas BUY/HOLD/SELL)
+# ============================================================================
+#
+# Ambang BUY/SELL per gaya trading:
+# - scalp (Scalping / Day Trading): responsif — BUY >= 60, SELL < 40.
+# - swing (Swing Trading, standar): lebih selektif — BUY >= 68, SELL < 32.
+# - mode None (baseline lama)     : 70/30 — dipakai mesin backtest agar
+#   perilaku & 29 unit test lama tidak bergeser tanpa sebab.
+SIGNAL_MODES = {
+    "scalp": {
+        "buy": 60.0,
+        "sell": 40.0,
+        "label": "Scalping / Day Trading",
+    },
+    "swing": {
+        "buy": 68.0,
+        "sell": 32.0,
+        "label": "Swing Trading",
+    },
+}
+DEFAULT_SIGNAL_MODE = "swing"
+
+# Penalti skor saat trend filter gagal TAPI momentum jangka pendek sedang
+# breakout kuat (relaksasi SMA-200: berikan penalti, jangan langsung
+# membatalkan sinyal ke HOLD — lihat assess_trend_filter).
+TREND_BREAKOUT_PENALTY = 12.0
+
+
+def mode_thresholds(mode: str = None) -> tuple:
+    """(buy_threshold, sell_threshold) untuk mode sinyal.
+
+    Mode tidak dikenal / None -> baseline lama 70/30.
+    """
+    cfg = SIGNAL_MODES.get((mode or "").strip().lower())
+    if cfg:
+        return cfg["buy"], cfg["sell"]
+    return 70.0, 30.0
+
+
 def classify_regime(data: dict) -> str:
     """Rezim pasar dari ADX 14 (Phase 3).
 
@@ -87,6 +127,128 @@ def trend_filter_ok(data: dict) -> bool:
     return True
 
 
+def momentum_breakout(data: dict, prev: dict = None) -> dict:
+    """Deteksi breakout momentum jangka pendek (penentu relaksasi filter).
+
+    Syarat "kuat" (semua terpenuhi):
+    - MACD golden cross: garis MACD di atas signal DAN histogram > 0.
+    - RSI zona bullish 50-78 (momentum naik, belum overbought ekstrem).
+    - Menguat: bila baris sebelumnya (`prev`) tersedia — histogram naik,
+      RSI naik, atau fresh golden cross (sebelumnya MACD <= signal).
+      Tanpa `prev` syarat ini di-skip (evaluasi single-bar).
+
+    Return {"ok": bool, "evidence": [str, ...]}.
+    """
+    rsi = data.get("rsi_14")
+    macd = data.get("macd")
+    signal_line = data.get("macd_signal")
+    hist = data.get("macd_histogram")
+
+    if rsi is None or macd is None or signal_line is None or hist is None:
+        return {"ok": False, "evidence": []}
+
+    macd_bull = macd > signal_line and hist > 0
+    rsi_bull = 50.0 <= float(rsi) <= 78.0
+    if not macd_bull or not rsi_bull:
+        return {"ok": False, "evidence": []}
+
+    evidence = ["MACD golden cross (histogram > 0)", f"RSI {rsi:.1f} zona bullish"]
+
+    if prev:
+        prev_hist = prev.get("macd_histogram")
+        prev_rsi = prev.get("rsi_14")
+        prev_macd = prev.get("macd")
+        prev_signal = prev.get("macd_signal")
+        fresh_cross = (
+            prev_macd is not None and prev_signal is not None
+            and prev_macd <= prev_signal
+        )
+        rising = (
+            fresh_cross
+            or (prev_hist is not None and hist > prev_hist)
+            or (prev_rsi is not None and rsi > prev_rsi)
+        )
+        if not rising:
+            return {"ok": False, "evidence": []}
+        if fresh_cross:
+            evidence.append("golden cross baru terbentuk")
+        else:
+            evidence.append("momentum menguat dari bar sebelumnya")
+
+    return {"ok": True, "evidence": evidence}
+
+
+def assess_trend_filter(data: dict, mode: str = None, prev: dict = None) -> dict:
+    """Evaluasi trend filter sesuai trading style + relaksasi breakout.
+
+    - mode None  : filter lama mutlak (SMA 50/200) — dipakai backtest.
+    - mode "swing": filter standar SMA-50/SMA-200 + override mean-reversion.
+    - mode "scalp": disesuaikan ke EMA-20 / EMA-50 timeframe aktif
+      (bukan SMA-200 harian) — cocok untuk intraday.
+
+    Relaksasi (semua mode aktif): bila filter gagal TAPI momentum sedang
+    breakout kuat (momentum_breakout), berikan PENALTI skor
+    (TREND_BREAKOUT_PENALTY) alih-alih memblokir mutlak ke HOLD.
+
+    Return dict:
+      raw_ok      : lolos filter mentah?
+      status      : "pass" | "penalty" | "block"
+      penalty     : poin skor yang dipotong (0 bila bukan penalty)
+      ok          : efektif utk rekomendasi (False hanya saat block)
+      mode        : mode dinormalisasi (None utk baseline)
+      reason      : alasan manusiawi utk UI
+    """
+    key = (mode or "").strip().lower()
+    mode = key if key in SIGNAL_MODES else None
+    price = data["price"]
+
+    if mode == "scalp":
+        # Filter intraday: EMA-20 / EMA-50 pada timeframe aktif.
+        ema_20 = data.get("ema_20")
+        ema_50 = data.get("ema_50")
+        raw_ok = not (
+            (ema_20 is not None and price < ema_20)
+            or (ema_50 is not None and price < ema_50)
+        )
+        fail_reason = "Harga di bawah EMA-20/EMA-50 timeframe aktif."
+    else:
+        raw_ok = trend_filter_ok(data)
+        fail_reason = "Harga berada di bawah SMA-50 atau SMA-200 (kondisi bearish)."
+
+    if raw_ok:
+        return {
+            "mode": mode, "raw_ok": True, "status": "pass",
+            "penalty": 0.0, "ok": True, "reason": "",
+        }
+
+    # Baseline (mode None): filter tetap mutlak — dipakai mesin backtest
+    # agar perilaku lama & walk-forward tidak berubah.
+    if mode is None:
+        return {
+            "mode": None, "raw_ok": False, "status": "block",
+            "penalty": 0.0, "ok": False, "reason": fail_reason,
+        }
+
+    # Relaksasi: momentum breakout kuat -> penalti skor, bukan blokir mutlak.
+    momo = momentum_breakout(data, prev)
+    if momo["ok"]:
+        return {
+            "mode": mode, "raw_ok": False, "status": "penalty",
+            "penalty": TREND_BREAKOUT_PENALTY, "ok": True,
+            "reason": (
+                "Trend filter gagal, tapi momentum breakout kuat ("
+                + "; ".join(momo["evidence"])
+                + f") — skor dipotong {TREND_BREAKOUT_PENALTY:.0f} poin "
+                "alih-alih dibatalkan."
+            ),
+        }
+
+    return {
+        "mode": mode, "raw_ok": False, "status": "block",
+        "penalty": 0.0, "ok": False, "reason": fail_reason,
+    }
+
+
 def calculate_momentum_score(data: dict) -> float:
     rsi = data["rsi_14"]
 
@@ -174,7 +336,15 @@ def calculate_volume_score(data: dict) -> float:
     return 45.0
 
 
-def calculate_technical_score(data: dict) -> dict:
+def calculate_technical_score(data: dict, mode: str = None, prev: dict = None) -> dict:
+    """Skor teknikal 0-100.
+
+    - mode    : trading style ("scalp"/"swing") — mengaktifkan ambang
+      mode_thresholds + filter EMA (scalp) + relaksasi penalti breakout.
+      Mode None = perilaku baseline persis seperti lama (backtest).
+    - prev    : baris indikator sebelumnya (untuk deteksi momentum
+      menguat / fresh golden cross pada relaksasi trend filter).
+    """
     trend_score = calculate_trend_score(data)
 
     momentum_score = calculate_momentum_score(data)
@@ -210,6 +380,15 @@ def calculate_technical_score(data: dict) -> dict:
         2
     )
 
+    # Trend filter: mode-aware (EMA untuk scalp, SMA untuk swing) + relaksasi
+    # penalti bila momentum breakout kuat. Mode None -> filter lama mutlak.
+    trend_filter = assess_trend_filter(data, mode=mode, prev=prev)
+    if trend_filter["status"] == "penalty":
+        technical_score = round(
+            max(0.0, technical_score - trend_filter["penalty"]), 2
+        )
+    filter_ok = trend_filter["ok"]
+
     if technical_score >= 60:
         condition = "BULLISH"
 
@@ -219,7 +398,7 @@ def calculate_technical_score(data: dict) -> dict:
     else:
         condition = "BEARISH"
 
-    filter_ok = trend_filter_ok(data)
+    buy_threshold, sell_threshold = mode_thresholds(mode)
 
     return {
         "trend_score": round(trend_score, 2),
@@ -232,7 +411,15 @@ def calculate_technical_score(data: dict) -> dict:
         "regime": regime,
         "trend_filter_ok": filter_ok,
         "technical_score": technical_score,
-        "condition": condition
+        "condition": condition,
+        # Detail trend filter utk UI (status pass/penalty/block + alasan).
+        "trend_filter": trend_filter,
+        # Ambang sinyal mode aktif (utk signal strength gauge di UI).
+        "mode": trend_filter["mode"],
+        "signal_thresholds": {
+            "buy": buy_threshold,
+            "sell": sell_threshold,
+        },
     }
 
 

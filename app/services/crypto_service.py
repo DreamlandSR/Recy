@@ -15,11 +15,12 @@ BASE_URL = "https://api.coingecko.com/api/v3"
 
 # ================= Cache anti rate-limit (429) =================
 # TTL per spesifikasi:
-#   get_coin_history : 5 menit
-#   get_market_data  : 3 menit
+#   get_coin_history : 30 detik (data lebih segar; frontend refresh tiap 30 dtk)
+#   get_market_data  : 30 detik
 #   get_coin_list    : 10 menit (data jarang berubah; dipakai resolve_coin_id)
-CACHE_HISTORY_TTL = 5 * 60
-CACHE_MARKET_TTL = 3 * 60
+# Fallback 429 tetap ditangani get_json_with_retry (retry+backoff+publik).
+CACHE_HISTORY_TTL = 30.0
+CACHE_MARKET_TTL = 30.0
 CACHE_COIN_LIST_TTL = 10 * 60
 
 _cache = TTLCache()
@@ -119,11 +120,17 @@ async def get_coin_history(coin_id: str, days: str = "90", with_api_key: bool = 
         "interval": "daily"
     }
 
-    data = await get_json_with_retry(
-        url, params=params, headers=headers,
-        # Fallback publik hanya relevan bila key ikut dikirim.
-        fallback_no_key=bool(headers),
-    )
+    try:
+        data = await get_json_with_retry(
+            url, params=params, headers=headers,
+            # Fallback publik hanya relevan bila key ikut dikirim.
+            fallback_no_key=bool(headers),
+        )
+    except httpx.HTTPError:
+        # CoinGecko masih 429/5xx setelah retry (mis. kuota habis). Kembalikan
+        # None sebagai penanda "tak ada data" agar pemanggil bisa fallback
+        # window lebih kecil / tampil kosong, bukan melempar 500 ke frontend.
+        return None
     _cache.set(cache_key, data, CACHE_HISTORY_TTL)
     return data
 

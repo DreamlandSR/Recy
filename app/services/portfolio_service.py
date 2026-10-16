@@ -233,6 +233,59 @@ async def closed_summary() -> dict:
 
 
 # =====================================================================
+# Backup / Restore (Phase 10 — proteksi data jurnal pribadi)
+# =====================================================================
+
+def backup_payload() -> dict:
+    """Snapshot seluruh posisi aktif + riwayat trade tertutup."""
+    with _lock:
+        data = _load()
+        return {
+            "positions": [dict(p) for p in data["positions"]],
+            "closed_positions": [dict(p) for p in data["closed_positions"]],
+        }
+
+
+def restore_payload(payload: dict, mode: str = "merge") -> dict:
+    """Pulihkan jurnal dari backup. `merge` = union by id (data lama
+    menang bila bentrok); `replace` = timpa file.
+
+    Raises ValueError bila bentuk payload tidak valid.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("payload backup tidak valid (bukan objek).")
+    positions = payload.get("positions", [])
+    closed = payload.get("closed_positions", [])
+    if not isinstance(positions, list) or not isinstance(closed, list):
+        raise ValueError(
+            "payload backup tidak valid (field positions/closed_positions)."
+        )
+    for p in positions + closed:
+        if not isinstance(p, dict) or not p.get("coin_id"):
+            raise ValueError("payload backup berisi entri posisi tidak valid.")
+
+    with _lock:
+        data = _load()
+        if mode == "replace":
+            data["positions"] = [dict(p) for p in positions]
+            data["closed_positions"] = [dict(p) for p in closed]
+        else:
+            for key, incoming in (("positions", positions), ("closed_positions", closed)):
+                existing_ids = {p.get("id") for p in data[key]}
+                for p in incoming:
+                    if p.get("id") not in existing_ids:
+                        data[key].append(dict(p))
+                        existing_ids.add(p.get("id"))
+        _save(data)
+
+    return {
+        "mode": mode,
+        "positions": len(data["positions"]),
+        "closed_positions": len(data["closed_positions"]),
+    }
+
+
+# =====================================================================
 # Enrichment live (harga, PnL, status SL & trailing)
 # =====================================================================
 
@@ -245,6 +298,8 @@ async def _live_snapshot(coin_id: str) -> dict:
     mengambang & status SL/trailing bergerak real-time; fallback CoinGecko.
     """
     history = await get_coin_history(coin_id, days=365)
+    if history is None:
+        raise ValueError("Data harga sementara tidak tersedia (rate-limit CoinGecko).")
     prices = history["prices"]
     volumes = history.get("total_volumes") or []
 

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -22,10 +23,17 @@ from app.services.crypto_service import (
 )
 
 from app.services.technical_service import calculate_sma_ema
-from app.services.scoring_service import calculate_technical_score, calculate_final_score
+from app.services.scoring_service import (
+    calculate_technical_score,
+    calculate_final_score,
+    SIGNAL_MODES,
+    DEFAULT_SIGNAL_MODE,
+    mode_thresholds,
+)
 from app.services.recommendation_service import (
     generate_recommendation,
     build_execution_plan,
+    signal_from_score,
 )
 from app.services.news_service import get_crypto_news
 from app.services.sentiment_service import analyze_news_sentiment, calculate_sentiment_score
@@ -74,6 +82,34 @@ async def _check_price_alerts(items: list) -> list:
     return triggered
 
 
+async def _check_indicator_alerts(coin_ids: list) -> list:
+    """Nilai RSI14/ADX terkini (history CoinGecko cache 5 mnt) -> evaluasi
+    aturan indikator + kirim Telegram bila terpicu."""
+    values = {}
+    for cid in dict.fromkeys(coin_ids):  # dedupe, urutan terjaga
+        try:
+            history = await get_coin_history(cid, days=365)
+            latest = calculate_sma_ema(
+                history["prices"], history.get("total_volumes") or []
+            )[-1]
+            values[cid] = {
+                "RSI14": latest.get("rsi_14"),
+                "ADX": latest.get("adx_14"),
+            }
+        except Exception:  # koin gagal -> dilewati, aturan lain tetap jalan
+            continue
+
+    triggered = price_alert_service.evaluate_indicator_alerts(values)
+    for a in triggered:
+        arrow = "≥" if a["direction"] == "ABOVE" else "≤"
+        await send_telegram_alert(
+            "📉 <b>Recy Indicator Alert</b>\n"
+            f"{a['coin_id'].upper()} {a['indicator']} {arrow} {a['target']:g}\n"
+            f"Nilai terkini: {a['trigger_value']:g}"
+        )
+    return triggered
+
+
 async def _alert_scan() -> tuple:
     """Snapshot data untuk satu siklus scheduler alert.
 
@@ -89,16 +125,20 @@ async def _alert_scan() -> tuple:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Startup: jalankan background scheduler alert Telegram (30 menit
-    # default, ALERT_INTERVAL_MINUTES di .env). Dormant tanpa token.
+    # default, ALERT_INTERVAL_MINUTES di .env) + Daily Digest (sekali
+    # sehari, DIGEST_HOUR di .env). Dormant tanpa token.
     task = asyncio.create_task(alert_scheduler_loop(_alert_scan))
+    digest_task = asyncio.create_task(_digest_scheduler_loop())
     try:
         yield
     finally:
         task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        digest_task.cancel()
+        for t in (task, digest_task):
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(
@@ -160,11 +200,72 @@ async def _watchlist_meta() -> dict:
         return {}
 
 
+# ============================================================================
+# Timeframe sinyal dinamis (Phase 11): indikator teknikal dihitung dari
+# candle Binance (get_binance_klines) sesuai timeframe yang dipilih UI.
+# ============================================================================
+SIGNAL_TIMEFRAMES = ("15m", "1h", "4h", "1D", "1W")
+
+# tf -> (interval klines Binance, jumlah bar). Bar cukup utk warm-up
+# indikator (SMA/EMA 200 butuh 200 bar).
+_TF_KLINES = {
+    "15m": ("15m", 600),   # 600 x 15m ≈ 6.2 hari
+    "1h": ("1h", 500),
+    "4h": ("4h", 400),
+    "1D": ("1d", 400),
+    "1W": None,            # mingguan -> harian CoinGecko 365 hari (≈52 minggu)
+}
+
+
+def _normalize_tf(tf: str) -> str:
+    tf = (tf or "1D").strip()
+    return tf if tf in SIGNAL_TIMEFRAMES else "1D"
+
+
+def _normalize_mode(mode: str) -> str:
+    mode = (mode or "").strip().lower()
+    return mode if mode in SIGNAL_MODES else DEFAULT_SIGNAL_MODE
+
+
+async def _signal_series(coin_id: str, tf: str = "1D", days: int = 365):
+    """(prices, volumes, source) untuk kalkulasi indikator pada timeframe `tf`.
+
+    - tf intraday/harian (15m/1h/4h/1D): candle OHLCV Binance via
+      get_binance_klines (cache 30 dtk / 5 mnt, tanpa API key).
+    - koin TANPA pasangan USDT di Binance / klines gagal / tf 1W:
+      fallback mulus ke riwayat harian CoinGecko (data historis) — tanpa
+      error, baris watchlist tetap utuh (requirement fallback).
+
+    Return (None, None, None) bila kedua sumber tidak tersedia.
+    """
+    conf = _TF_KLINES.get(tf)
+    if conf:
+        payload = await get_binance_klines(
+            coin_id, interval=conf[0], limit=conf[1]
+        )
+        if payload and payload.get("bars"):
+            bars = payload["bars"]
+            prices = [[b["time"] * 1000, b["close"]] for b in bars]
+            volumes = [[b["time"] * 1000, b["volume"]] for b in bars]
+            return prices, volumes, "binance_klines"
+
+    history = await get_coin_history(coin_id, days=days)
+    if history is None or not history.get("prices"):
+        return None, None, None
+    return (
+        history["prices"],
+        history.get("total_volumes") or [],
+        "coingecko",
+    )
+
+
 async def _watchlist_item(
     coin_id: str,
     meta: dict,
     live_price: float = None,
     change_24h_pct: float = None,
+    tf: str = "1D",
+    mode: str = "swing",
 ) -> dict:
     """Ringkas satu koin: harga, trend, rekomendasi, SL/TP.
 
@@ -172,6 +273,11 @@ async def _watchlist_item(
     `current_price` sehingga harga di tabel & level SL/TP/trailing ikut
     bergerak real-time. Bila None (Binance gagal / koin tanpa pasangan),
     otomatis memakai harga harian CoinGecko (fallback tanpa error).
+
+    `tf`  : timeframe sinyal (15m/1h/4h/1D/1W) — indikator teknikal
+            dihitung dari candle Binance sesuai timeframe (fallback
+            CoinGecko bila koin tanpa pasangan / klines gagal).
+    `mode`: trading style (scalp/swing) — ambang BUY/SELL + filter trend.
     """
     info = meta.get(coin_id, {})
     item = {
@@ -179,24 +285,44 @@ async def _watchlist_item(
         "name": info.get("name", coin_id),
         "symbol": (info.get("symbol") or coin_id).upper(),
         "change_24h_pct": change_24h_pct,
+        "tf": tf,
+        "mode": mode,
     }
 
     # Harga live Binance (bila tersedia) — fallback CoinGecko di bawah.
     price = float(live_price) if live_price else None
     price_source = "binance" if price is not None else "coingecko"
 
+    # Koin tidak dikenal CoinGecko (typo saat add) -> penanda permanen
+    # `not_found` — frontend HANYA menghapus koin kustom berdasarkan ini
+    # (bukan error sementara), sesuai aturan persistensi watchlist.
+    if meta and coin_id not in meta:
+        item["not_found"] = True
+        item["error"] = f"Koin '{coin_id}' tidak ditemukan di CoinGecko."
+        if price is not None:
+            item["price"] = price
+            item["price_source"] = "binance"
+        return item
+
     try:
-        history = await get_coin_history(coin_id, days=365)
-        prices = history["prices"]
-        volumes = history.get("total_volumes") or []
+        prices, volumes, data_source = await _signal_series(coin_id, tf)
+        if prices is None:
+            raise RuntimeError(
+                "Data harga tidak tersedia (rate-limit CoinGecko / offline)"
+            )
 
         technical_data = calculate_sma_ema(prices, volumes)
+        if not technical_data:
+            raise RuntimeError("Data indikator kosong (jendela terlalu pendek)")
         latest_data = technical_data[-1]
+        prev_data = technical_data[-2] if len(technical_data) > 1 else None
 
-        technical_score = calculate_technical_score(latest_data)
+        technical_score = calculate_technical_score(
+            latest_data, mode=mode, prev=prev_data
+        )
 
         # Harga live Binance menggantikan harga harian CoinGecko untuk
-        # seluruh perhitungan eksekusi; ATR tetap dari data harian.
+        # seluruh perhitungan eksekusi; ATR tetap dari data timeframe aktif.
         if price is None:
             price = float(latest_data["price"])
 
@@ -208,6 +334,7 @@ async def _watchlist_item(
             current_price=price,
             atr_14=latest_data.get("atr_14"),
             price_source=price_source,
+            mode=mode,
         )
 
         execution = recommendation["execution"]
@@ -219,6 +346,19 @@ async def _watchlist_item(
             # ADX utk filter scanner "Trending" di UI (tanpa panggilan API baru).
             "adx_14": technical_score.get("adx_14"),
             "recommendation": recommendation["recommendation"],  # BUY/HOLD/SELL
+            # Signal Strength Gauge (Phase 11): kekuatan + label sinyal.
+            "signal": {
+                "strength": recommendation["signal_strength"],
+                "label": recommendation["signal_label"],
+                "recommendation": recommendation["recommendation"],
+                "buy_threshold": recommendation["buy_threshold"],
+                "sell_threshold": recommendation["sell_threshold"],
+                "mode": mode,
+                "tf": tf,
+                "mode_label": SIGNAL_MODES.get(mode, {}).get("label", mode),
+            },
+            # Sumber data indikator timeframe aktif (binance klines / coingecko).
+            "signal_source": data_source,
             "sl_price": execution["stop_loss_price"],
             "tp_price": execution["take_profit_price"],
             "trailing_stop_trigger": execution["trailing_stop_trigger"],
@@ -227,7 +367,9 @@ async def _watchlist_item(
         })
     except Exception as exc:
         # Koin gagal (mis. 429/404) tidak menjatuhkan koin lain. Harga live
-        # Binance tetap bisa tampil walau CoinGecko sedang error.
+        # Binance tetap bisa tampil walau CoinGecko sedang error — frontend
+        # menampilkan "Data Terbatas / Offline" + tombol retry (koin TETAP
+        # di watchlist, tidak dihapus dari localStorage).
         item["error"] = f"{type(exc).__name__}: {exc}"
         if price is not None:
             item["price"] = price
@@ -237,16 +379,27 @@ async def _watchlist_item(
 
 
 @app.get("/api/crypto/dashboard/watchlist")
-async def crypto_dashboard_watchlist(coins: str = None):
+async def crypto_dashboard_watchlist(
+    coins: str = None, tf: str = "1D", mode: str = "swing"
+):
     """Ringkasan seluruh koin pantauan dalam SATU response JSON.
 
     Query opsional `coins` = daftar dipisah koma (contoh:
     ?coins=bitcoin,solana). Default: bitcoin, ethereum, solana,
     binancecoin, ripple.
 
+    Query opsional Phase 11:
+    - `tf`   : timeframe sinyal (15m/1h/4h/1D/1W) — indikator dihitung
+      dari candle Binance sesuai timeframe (fallback CoinGecko).
+    - `mode` : trading style — "scalp" (BUY>=60/SELL<40) atau
+      "swing" (BUY>=68/SELL<32, standar).
+
     Data di-cache in-memory (history 5 menit, coin list 10 menit)
     agar panggilan berulang tidak kena HTTP 429 CoinGecko.
     """
+    tf = _normalize_tf(tf)
+    mode = _normalize_mode(mode)
+
     if coins and coins.strip():
         requested = [c.strip().lower() for c in coins.split(",") if c.strip()]
     else:
@@ -276,6 +429,8 @@ async def crypto_dashboard_watchlist(coins: str = None):
                 meta,
                 live_price=live.get(coin_id),
                 change_24h_pct=changes.get(coin_id),
+                tf=tf,
+                mode=mode,
             )
         )
 
@@ -284,6 +439,8 @@ async def crypto_dashboard_watchlist(coins: str = None):
 
     return {
         "count": len(items),
+        "tf": tf,
+        "mode": mode,
         "binance_live": bool(live),
         "alerts_triggered": triggered_alerts,
         "coins": list(items),
@@ -291,7 +448,9 @@ async def crypto_dashboard_watchlist(coins: str = None):
 
 
 @app.get("/api/crypto/live-prices")
-async def crypto_live_prices(coins: str = None):
+async def crypto_live_prices(
+    coins: str = None, tf: str = "1D", mode: str = "swing"
+):
     """Harga live Binance + level SL/TP terbaru — polling cepat UI (5 detik).
 
     Ringan di backend: history CoinGecko di-cache 5 menit dan harga
@@ -299,7 +458,13 @@ async def crypto_live_prices(coins: str = None):
     oleh dashboard agar harga & Stop-Loss bergerak real-time detik per
     detik. Selalu 200 — bila Binance gagal, item memakai harga CoinGecko
     (price_source="coingecko").
+
+    `tf` & `mode` mengikuti pilihan sinyal UI agar rekomendasi/SL/TP di
+    polling ini konsisten dengan watchlist (lihat endpoint watchlist).
     """
+    tf = _normalize_tf(tf)
+    mode = _normalize_mode(mode)
+
     coin_ids = await _resolve_coin_ids(_requested_coins(coins))
     meta = await _watchlist_meta()
 
@@ -314,6 +479,8 @@ async def crypto_live_prices(coins: str = None):
                 meta,
                 live_price=live.get(coin_id),
                 change_24h_pct=changes.get(coin_id),
+                tf=tf,
+                mode=mode,
             )
         )
 
@@ -322,6 +489,8 @@ async def crypto_live_prices(coins: str = None):
 
     return {
         "count": len(items),
+        "tf": tf,
+        "mode": mode,
         "binance_live": bool(live),
         "alerts_triggered": triggered_alerts,
         "coins": list(items),
@@ -360,44 +529,93 @@ async def crypto_klines(coin_id: str, interval: str = "1h", limit: int = 200):
 @app.get("/api/crypto/{coin_id}/technical")
 async def crypto_technical(coin_id: str, days: int = 365):
     history = await get_coin_history(coin_id, days=days)
+    if history is None:
+        raise HTTPException(status_code=503, detail="Data harga sementara tidak tersedia (rate-limit CoinGecko).")
 
     prices = history["prices"]
     volumes = history.get("total_volumes") or []
 
     return calculate_sma_ema(prices, volumes)
 
-@app.get("/api/crypto/{coin_id}/technical/score")
-async def crypto_technical_score(coin_id: str, days: int = 365):
-    history = await get_coin_history(coin_id, days=days)
+async def _detail_series(coin_id: str, tf: str, days: int):
+    """(technical_data, prev_data, data_source) utk endpoint detail.
 
-    prices = history["prices"]
-    volumes = history.get("total_volumes") or []
+    Sama dengan _signal_series, dengan fallback window lebih kecil (90 hari)
+    saat CoinGecko 429 — request ringan lebih mungkin lolos daripada 500.
+    """
+    tf = _normalize_tf(tf)
+    prices, volumes, data_source = await _signal_series(coin_id, tf, days=days)
+    if prices is None:
+        # CoinGecko 429 (kuota habis) -> coba window lebih kecil; request
+        # ringan ini lebih mungkin lolos dan tetap beri sinyal daripada 500.
+        history = await get_coin_history(coin_id, days=90)
+        if history is not None and history.get("prices"):
+            prices = history["prices"]
+            volumes = history.get("total_volumes") or []
+            data_source = "coingecko"
+    if prices is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Data harga sementara tidak tersedia (rate-limit CoinGecko / Binance).",
+        )
 
     technical_data = calculate_sma_ema(prices, volumes)
-
+    if not technical_data:
+        raise HTTPException(
+            status_code=503,
+            detail="Data indikator kosong (jendela timeframe terlalu pendek).",
+        )
     latest_data = technical_data[-1]
+    prev_data = technical_data[-2] if len(technical_data) > 1 else None
+    return latest_data, prev_data, data_source
 
-    score = calculate_technical_score(latest_data)
+
+@app.get("/api/crypto/{coin_id}/technical/score")
+async def crypto_technical_score(
+    coin_id: str, days: int = 365, tf: str = "1D", mode: str = "swing"
+):
+    """Skor teknikal + Signal Strength Gauge pada timeframe (`tf`) aktif.
+
+    `mode` (scalp/swing) menentukan ambang BUY/SELL + filter trend;
+    response menyertakan `signal` (strength/label/threshold) utk gauge UI.
+    """
+    mode = _normalize_mode(mode)
+    latest_data, prev_data, data_source = await _detail_series(coin_id, tf, days)
+
+    score = calculate_technical_score(latest_data, mode=mode, prev=prev_data)
+    signal = signal_from_score(
+        score["technical_score"],
+        score["condition"],
+        trend_filter_ok=score["trend_filter_ok"],
+        mode=mode,
+    )
+    # Konteks UI (gauge): timeframe & label mode aktif.
+    signal["tf"] = _normalize_tf(tf)
+    signal["mode_label"] = SIGNAL_MODES.get(mode, {}).get("label", mode)
 
     return {
         "coin_id": coin_id,
+        "tf": _normalize_tf(tf),
+        "mode": mode,
+        "data_source": data_source,
         "latest_data": latest_data,
-        "score": score
+        "score": score,
+        "signal": signal,
     }
-    
+
 @app.get("/api/crypto/{coin_id}/recommendation")
-async def crypto_recommendation(coin_id: str, days: int = 365):
+async def crypto_recommendation(
+    coin_id: str, days: int = 365, tf: str = "1D", mode: str = "swing"
+):
+    """Rekomendasi + eksekusi pada timeframe (`tf`) & trading style (`mode`)."""
+    mode = _normalize_mode(mode)
+    tf = _normalize_tf(tf)
 
-    history = await get_coin_history(coin_id, days=days)
+    latest_data, prev_data, data_source = await _detail_series(coin_id, tf, days)
 
-    prices = history["prices"]
-    volumes = history.get("total_volumes") or []
-
-    technical_data = calculate_sma_ema(prices, volumes)
-
-    latest_data = technical_data[-1]
-
-    technical_score = calculate_technical_score(latest_data)
+    technical_score = calculate_technical_score(
+        latest_data, mode=mode, prev=prev_data
+    )
 
     # Harga live Binance (fallback CoinGecko) sebagai current_price —
     # level SL/TP/trailing dihitung ulang dari harga bursa yang bergerak.
@@ -416,10 +634,14 @@ async def crypto_recommendation(coin_id: str, days: int = 365):
         current_price=price,
         atr_14=latest_data.get("atr_14"),
         price_source=price_source,
+        mode=mode,
     )
 
     return {
         "coin_id": coin_id,
+        "tf": tf,
+        "mode": mode,
+        "data_source": data_source,
         "price_source": price_source,
         "change_24h_pct": changes.get(coin_id),
         "technical": technical_score,
@@ -456,7 +678,10 @@ async def crypto_sentiment(coin_id: str):
     }
 
 @app.get("/api/crypto/{coin_id}/analysis")
-async def crypto_analysis(coin_id: str, days: int = 365):
+async def crypto_analysis(
+    coin_id: str, days: int = 365, tf: str = "1D", mode: str = "swing"
+):
+    """Eksekusi + sentimen berita pada timeframe (`tf`) & mode (`mode`)."""
 
     resolved_coin_id = await resolve_coin_id(coin_id)
 
@@ -466,18 +691,12 @@ async def crypto_analysis(coin_id: str, days: int = 365):
             detail=f"Coin '{coin_id}' tidak ditemukan di CoinGecko."
         )
 
-    history = await get_coin_history(resolved_coin_id, days=days)
-
-    prices = history["prices"]
-    volumes = history.get("total_volumes") or []
-
-    technical_data = calculate_sma_ema(prices, volumes)
-
-    latest_data = technical_data[-1]
-
-    technical = calculate_technical_score(
-        latest_data
+    mode = _normalize_mode(mode)
+    latest_data, prev_data, data_source = await _detail_series(
+        resolved_coin_id, tf, days
     )
+
+    technical = calculate_technical_score(latest_data, mode=mode, prev=prev_data)
 
     news = await get_crypto_news(resolved_coin_id)
 
@@ -491,9 +710,14 @@ async def crypto_analysis(coin_id: str, days: int = 365):
         sentiment_articles
     )
 
+    # Threshold final score mengikuti trading style aktif (scalp 60/40,
+    # swing 68/32) agar konsisten dengan sinyal watchlist/gauge.
+    buy_threshold, sell_threshold = mode_thresholds(mode)
     final = calculate_final_score(
         technical_score=technical["technical_score"],
-        sentiment_score=sentiment["sentiment_score"]
+        sentiment_score=sentiment["sentiment_score"],
+        buy_threshold=buy_threshold,
+        sell_threshold=sell_threshold,
     )
 
     # Tugas 1: parameter eksekusi riil juga muncul di endpoint analysis.
@@ -512,12 +736,44 @@ async def crypto_analysis(coin_id: str, days: int = 365):
 
     return {
         "coin_id": resolved_coin_id,
+        "tf": _normalize_tf(tf),
+        "mode": mode,
+        "data_source": data_source,
         "technical": technical,
         "sentiment": sentiment,
         "final": final,
         "execution": execution,
         "articles": sentiment_articles
     }
+
+@app.get("/api/coins/resolve")
+async def coin_resolve(q: str):
+    """Resolusi satu query (id/nama/simbol/alias) -> coin_id CoinGecko.
+
+    Dipakai tombol "Tambah" di dashboard: koin kustom disimpan dengan
+    coin_id FINAL (mis. "doge"/"Dogecoin" -> "dogecoin") sehingga tombol
+    hapus (x) selalu tampil dan koin tidak salah terdeteksi "tidak
+    ditemukan" hanya karena beda bentuk nama. 404 bila tidak dikenal.
+    """
+    resolved = await resolve_coin_id(q)
+    if resolved is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Koin '{q}' tidak ditemukan di CoinGecko.",
+        )
+    info = {}
+    try:
+        coins = await get_coin_list()
+        info = next((c for c in coins if c["id"] == resolved), {})
+    except Exception:  # noqa: BLE001 — meta bersifat pelengkap
+        pass
+    return {
+        "query": q,
+        "coin_id": resolved,
+        "name": info.get("name"),
+        "symbol": (info.get("symbol") or "").upper(),
+    }
+
 
 @app.get("/api/coins")
 async def coins_list():
@@ -586,6 +842,11 @@ async def _backtest_report(coin_id: str, days: int = 365) -> dict:
         return cached
 
     history = await get_coin_history(coin_id, days=days)
+    if history is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Data harga sementara tidak tersedia (rate-limit CoinGecko).",
+        )
     rows = build_technical_rows(
         history["prices"], history.get("total_volumes") or []
     )
@@ -733,11 +994,40 @@ async def price_alert_add(payload: PriceAlertIn):
 
 @app.delete("/api/alerts/price/{alert_id}")
 async def price_alert_delete(alert_id: str):
-    """Hapus satu aturan alert (aktif maupun sudah terpicu)."""
+    """Hapus satu aturan alert (harga/indikator, aktif/terpicu)."""
     removed = price_alert_service.delete_alert(alert_id)
     if removed is None:
         raise HTTPException(status_code=404, detail="Alert tidak ditemukan.")
     return {"deleted": True, "alert": removed}
+
+
+class IndicatorAlertIn(BaseModel):
+    coin_id: str = Field(min_length=1, examples=["solana"])
+    indicator: str = Field(default="RSI14", examples=["RSI14"])
+    direction: str = Field(default="BELOW", examples=["BELOW"])
+    target: float = Field(gt=0, examples=[30.0])
+
+
+@app.post("/api/alerts/indicator", status_code=201)
+async def indicator_alert_add(payload: IndicatorAlertIn):
+    """Tambah aturan alert indikator (RSI14 / ADX) — sekali tembak.
+
+    Dievaluasi di endpoint check (poll 10 dtk) dari history CoinGecko
+    yang sudah di-cache 5 menit — tanpa request API tambahan berarti.
+    """
+    resolved = await resolve_coin_id(payload.coin_id)
+    if resolved is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Coin '{payload.coin_id}' tidak ditemukan di CoinGecko.",
+        )
+    try:
+        alert = price_alert_service.add_indicator_alert(
+            resolved, payload.indicator, payload.direction, payload.target
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"created": True, "alert": alert}
 
 
 @app.get("/api/alerts/price/check")
@@ -745,11 +1035,12 @@ async def price_alert_check(coins: str = None):
     """Cek alert memakai harga live Binance — RINGAN (batch cache 5 dtk).
 
     Dipoll UI tiap 10 detik secara independen sehingga aturan tetap
-    bereaksi detik walau WebSocket menahan polling harga. Koin pada
+    bereaksi detik walau WebSocket menahan polling harga. Koin pada
     aturan aktif di luar watchlist ikut diperiksa.
     """
     coin_ids = await _resolve_coin_ids(_requested_coins(coins))
-    for a in price_alert_service.list_alerts()["active"]:
+    alerts_snapshot = price_alert_service.list_alerts()
+    for a in alerts_snapshot["active"] + alerts_snapshot["indicator_active"]:
         if a["coin_id"] not in coin_ids:
             coin_ids.append(a["coin_id"])
 
@@ -759,7 +1050,156 @@ async def price_alert_check(coins: str = None):
         for cid in coin_ids
     ]
     triggered = await _check_price_alerts(items)
-    return {"count": len(triggered), "alerts_triggered": triggered}
+
+    # (Phase 10) Alert indikator (RSI14/ADX) — history cache 5 menit.
+    ind_triggered = await _check_indicator_alerts(
+        [a["coin_id"] for a in alerts_snapshot["indicator_active"]]
+    )
+
+    return {
+        "count": len(triggered) + len(ind_triggered),
+        "alerts_triggered": triggered,
+        "indicator_alerts_triggered": ind_triggered,
+    }
+
+
+# ============ Phase 10: Daily Digest (ringkasan pagi via Telegram) ============
+# Jam lokal pengiriman (0-23) — atur DIGEST_HOUR di .env (default 07:00).
+DIGEST_HOUR = int(os.getenv("DIGEST_HOUR", "7") or 7)
+
+
+async def build_daily_digest() -> str:
+    """Susun pesan ringkasan personal: pasar watchlist, portofolio,
+    realized PnL, Fear & Greed, dan alert terpicu. Tanpa network tambahan
+    (semua dari pipeline yang sudah di-cache)."""
+    data = await crypto_dashboard_watchlist(None)
+    items = [c for c in data.get("coins", []) if "error" not in c]
+    portfolio = await portfolio_service.list_positions()
+    closed = await portfolio_service.closed_summary()
+    alerts = price_alert_service.list_alerts()
+
+    fng_s = "—"
+    try:
+        series = await get_fng_history(days=2)
+        day = max(series)
+        fng_s = (
+            f"{series[day]['score']:.0f} — {series[day]['classification']}"
+        )
+    except Exception:  # FNG gagal -> digest tetap terkirim
+        pass
+
+    lines = []
+    for c in items[:5]:
+        ch = c.get("change_24h_pct")
+        ch_s = f" ({ch:+.2f}%)" if ch is not None else ""
+        price = c.get("price")
+        price_s = f"${price:,.2f}" if price is not None else "—"
+        lines.append(
+            f"• {c.get('symbol', '?')} {price_s}{ch_s} — "
+            f"{c.get('recommendation', '—')}"
+        )
+    market_s = "\n".join(lines) or "• (data tidak tersedia)"
+
+    totals = portfolio.get("totals", {})
+    val = totals.get("total_value_usd")
+    pnl = totals.get("total_pnl_usd")
+    pf_line = f"• Posisi aktif: {portfolio.get('count', 0)}"
+    if val is not None:
+        pf_line += f" | Nilai ${val:,.2f}"
+    if pnl is not None:
+        pf_line += f" | Floating {pnl:+,.2f} USD"
+    realized_line = (
+        f"• Realized {closed['total_realized_pnl_usd']:+,.2f} USD | "
+        f"Win rate {closed['win_rate_pct']:.0f}% "
+        f"({closed['win_count']}W/{closed['loss_count']}L)"
+    )
+    n_triggered = len(alerts["triggered"]) + len(alerts["indicator_triggered"])
+
+    today = datetime.now(timezone.utc).strftime("%d %b %Y")
+    return (
+        f"📅 <b>Recy Daily Digest — {today}</b>\n\n"
+        f"📊 <b>Pasar</b>\n{market_s}\n"
+        f"• Fear &amp; Greed: {fng_s}\n\n"
+        f"💼 <b>Portofolio</b>\n{pf_line}\n{realized_line}\n\n"
+        f"🔔 Alert terpicu (riwayat terbaru): {n_triggered}\n\n"
+        "<i>Semua angka informatif — bukan nasihat investasi.</i>"
+    )
+
+
+async def _digest_scheduler_loop() -> None:
+    """Kirim digest sekali sehari saat jam lokal >= DIGEST_HOUR.
+
+    Dicek tiap 5 menit; sekali dianggap terkirim untuk hari itu (baik
+    berhasil maupun Telegram belum dikonfigurasi) agar tidak spam.
+    """
+    last_sent = None
+    while True:
+        try:
+            now = datetime.now().astimezone()
+            today = now.date().isoformat()
+            if now.hour >= DIGEST_HOUR and last_sent != today:
+                last_sent = today
+                if tg_configured():
+                    await send_telegram_alert(await build_daily_digest())
+                    print(f"[Digest] terkirim {now.isoformat()}", flush=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(f"[Digest] gagal: {type(exc).__name__}: {exc}", flush=True)
+        await asyncio.sleep(300)
+
+
+@app.post("/api/alerts/digest/test")
+async def digest_test():
+    """Kirim (atau preview bila Telegram belum di-set) digest sekarang."""
+    message = await build_daily_digest()
+    sent = False
+    if tg_configured():
+        sent = await send_telegram_alert(message)
+    return {"sent": sent, "configured": tg_configured(), "preview": message}
+
+
+# ============ Phase 10: Backup & Restore Jurnal ============
+
+@app.get("/api/portfolio/backup")
+async def portfolio_backup():
+    """Snapshot jurnal (posisi + riwayat trade + semua alert) utk unduhan."""
+    return {
+        "app": "recy",
+        "type": "recy-journal-backup",
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "portfolio": portfolio_service.backup_payload(),
+        "alerts": price_alert_service.backup_payload(),
+    }
+
+
+class RestoreIn(BaseModel):
+    mode: str = Field(default="merge", examples=["merge"])
+    portfolio: Optional[dict] = None
+    alerts: Optional[dict] = None
+
+
+@app.post("/api/portfolio/restore")
+async def portfolio_restore(payload: RestoreIn):
+    """Pulihkan jurnal dari file backup — `merge` (union by id) / `replace`."""
+    if payload.mode not in ("merge", "replace"):
+        raise HTTPException(
+            status_code=422, detail="mode harus 'merge' atau 'replace'."
+        )
+    result = {"portfolio": None, "alerts": None}
+    try:
+        if payload.portfolio is not None:
+            result["portfolio"] = portfolio_service.restore_payload(
+                payload.portfolio, payload.mode
+            )
+        if payload.alerts is not None:
+            result["alerts"] = price_alert_service.restore_payload(
+                payload.alerts, payload.mode
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"restored": True, **result}
 
 
 # ============ Portofolio: Jurnal Posisi Pribadi ============
@@ -848,4 +1288,9 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/dashboard")
 async def serve_dashboard():
-    return FileResponse(STATIC_DIR / "index.html")
+    # Tanpa header cache: browser SELALU memvalidasi index.html terbaru
+    # (perubahan UI langsung terlihat setelah refresh tanpa hard-refresh).
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
