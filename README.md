@@ -193,7 +193,8 @@ Recy/
 │   └── details/                         # Detail log transaksi harian per aset
 │
 ├── docs/
-│   └── crypto_recommendation_planning.md # Perencanaan arsitektur & spesifikasi teknis
+│   ├── crypto_recommendation_planning.md # Perencanaan arsitektur & spesifikasi teknis
+│   └── indikator_teknikal_rationale.md  # Rasionil & justifikasi matematis parameter indikator
 │
 ├── run_backtest.py                      # Skrip eksekusi backtesting kuantitatif (V1–V5)
 ├── optimize_backtest.py                 # Skrip grid search optimasi parameter threshold & ATR
